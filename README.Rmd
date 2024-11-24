@@ -1,6 +1,6 @@
 ---
 title: "README"
-author: "HL VAN ZYL 17640296"
+author: "HENDRI VAN ZYL 17640296"
 date: "2024-11-24"
 output: github_document
 ---
@@ -17,6 +17,7 @@ Each answer is fully contained in a separate folder with relevant pdf outputs, c
 
 
 # QUESTION 1
+
 
 
 # QUESTION 2
