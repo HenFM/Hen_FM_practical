@@ -9,7 +9,7 @@ output: github_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Introduction
+# INTRODUCTION
 
 This README contains the planning, reasoning, considerations and explanations behind my answers for the financial econometrics practical exam. 
 
