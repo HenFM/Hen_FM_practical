@@ -1,0 +1,48 @@
+---
+title: "Question 1 PP"
+author: "HL VAN ZYL 17640296"
+date: "2024-11-25"
+output: powerpoint_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+library(tidyverse)
+ASISA <- read_rds(here("data","ASISA_Rets.rds"))
+BM <- read_rds(here("data", "Capped_SWIX.rds"))
+AI_Fund <- read_rds(here("data","AI_Max_Fund.rds"))
+
+```
+
+
+
+## R Markdown
+
+```{r}
+g2
+```
+
+
+## Slide with Bullets
+
+- Bullet 1
+- Bullet 2
+- Bullet 3
+
+## Slide with R Output
+
+```{r cars, echo = TRUE}
+summary(cars)
+```
+
+## Slide with Plot
+
+```{r pressure}
+plot(pressure)
+```
+

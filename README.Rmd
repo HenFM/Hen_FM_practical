@@ -9,6 +9,17 @@ output: github_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+```{r}
+
+rm(list = ls()) # Clean your environment:
+gc() # garbage collection
+library(here)
+library(fmxdat)
+
+library(tbl2xts)
+```
+
 # INTRODUCTION
 
 This README contains the planning, reasoning, considerations and explanations behind my answers for the financial econometrics practical exam. 
@@ -16,7 +27,269 @@ This README contains the planning, reasoning, considerations and explanations be
 Each answer is fully contained in a separate folder with relevant pdf outputs, code etc.
 
 
-# QUESTION 1
+# QUESTION 1: Systematic AI Fund
+
+Goal: Compare our AI fund to benchmark (capped SWIX) and actively managed funds of industry peers (ASISA) after costs using visualizations in a powerpoint. 
+How:  
+* Cumulative returns (annualized) using a 3 year month rolling window 
+* Show how rolling distributions of funds compare
+* Over/underperformance ratio
+* Stratify and compare performance during periods of high vs low valility (if I have enough time)
+
+
+I see no info on costs for ASISA funds are available so I will argue that if our returns are comparable then clearly the AI fund has outperformed because costs still need to be deducted from the ASISA returns. 
+
+## Data exploration
+```{r}
+library(tidyverse)
+
+# load data
+ASISA <- read_rds(here("data","ASISA_Rets.rds"))
+BM <- read_rds(here("data", "Capped_SWIX.rds"))
+AI_Fund <- read_rds(here("data","AI_Max_Fund.rds"))
+
+
+```
+
+Let's check the data. Do we have NAs? What is the frequency? 
+
+```{r}
+AI_Fund %>% 
+  summarise(NA_Count = sum(is.na(AI_Fund)))
+
+# 0 NAs
+
+BM %>% 
+  summarise(NA_Count = sum(is.na(Returns)))
+
+# 0 NAs 
+
+sum(is.na(ASISA$Returns))
+
+# 0 NAs
+
+# Let's check the last dates in each df
+
+# ASISA %>% select(date) %>% unique() %>% arrange(date) %>% tail()
+# BM %>% select(date) %>% arrange(date) %>% tail()
+# AI_Fund %>% select(date)  %>% arrange(date) %>% tail()
+
+# Last date == 30 September 2023 for all dfs
+
+
+```
+
+No NAs. Monthly frequency. Let's filter for non-indices in ASISA as we only want actively managed funds.
+
+
+
+```{r}
+ASISA <- ASISA %>% 
+  filter(Index == "No", FoF == "No") %>% select(-c(Index, FoF))
+
+
+
+BM <- BM %>% select(-Tickers)
+
+# How many funds are there?
+
+# ASISA %>% select(Fund) %>% unique() %>% count()
+
+# 1021 funds in ASISA 
+# We will be using the median
+
+  
+```
+
+
+
+
+
+```{r}
+library(RcppRoll)
+# Get median return for each month across all actively managed funds
+ASISA_Median <- ASISA %>%
+  group_by(date) %>%
+  summarise(Median_Return = median(Returns, na.rm = TRUE)) %>%
+  ungroup()
+
+# Merge all data into a single dataframe
+Fund_ret <- AI_Fund %>%
+  rename(AI_Return = AI_Fund) %>%
+  left_join(BM %>% rename(BM_Return = Returns), by = "date") %>%
+  left_join(Active_Median %>% rename(Active_Median_Return = Median_Return), by = "date") %>%
+  pivot_longer(
+    cols = -date, 
+    names_to = "Tickers", 
+    values_to = "Returns"
+  )
+
+Roll_ret <- Fund_ret %>%
+    group_by(Tickers) %>%
+    # Epic sorcery:
+mutate(RollRets = RcppRoll::roll_prod(1 + Returns, 36, fill = NA,
+    align = "right")^(12/36) - 1) %>%
+    # Note this cool trick: it removes dates that have no
+    # RollRets at all.
+group_by(date) %>%
+    filter(any(!is.na(RollRets))) %>%
+    ungroup()
+
+g <-
+Roll_ret %>%
+    filter(date > lubridate::ymd(20051231)) %>% 
+    ggplot() + geom_line(aes(date, RollRets, color = Tickers),
+    alpha = 0.7, size = 1.25) + labs(title = "Illustration of Rolling 3 Year Annualized Returns of various Indices with differing start dates",
+    subtitle = "", x = "", y = "Rolling 3 year Returns (Ann.)",
+    caption = "") + theme_fmx(title.size = ggpts(30),
+    subtitle.size = ggpts(5), caption.size = ggpts(25), CustomCaption = T) +
+    fmx_cols()
+
+ret_rol_plot <- fmxdat::finplot(g, x.date.dist = "1 year", x.date.type = "%Y", x.vert = T,
+    y.pct = T, y.pct_acc = 1)
+
+ret_rol_plot
+
+```
+
+
+```{r}
+library(tbl2xts)
+library(PerformanceAnalytics)
+xts.returns <- funds_ret %>% tbl_xts(tblData = ., cols_to_xts = Returns, spread_by = Tickers)
+chart.RiskReturnScatter(R=xts.returns['2006-01-01/'][,c("AI_Return", "BM_Return", "Active_Median_Return")])
+```
+
+
+
+## Rolling densities
+
+I want to replicate the figure in the question, which illustrates the overlapping densities for each funds density and marks the median. I do this using geom_density function
+
+```{r}
+
+plotdens <- plotdf %>% 
+  filter(date > lubridate::ymd(20060101), Tickers != "Active_Mean_Return") %>% 
+  ggplot(aes(x = RollRets)) + 
+  geom_density(aes(fill = Tickers), alpha = 0.6) +
+  geom_vline(data = . %>% filter(Tickers == "AI_Return") %>% summarise(median = median(RollRets, na.rm = TRUE)),
+             aes(xintercept = median),
+             linetype = "dashed", color = "green") +
+  geom_vline(data = . %>% filter(Tickers == "BM_Return") %>% summarise(median = median(RollRets, na.rm = TRUE)),
+             aes(xintercept = median),
+             linetype = "dashed", color = "blue") +
+  geom_vline(data = . %>% filter(Tickers == "Active_Median_Return") %>% summarise(median = median(RollRets, na.rm = TRUE)),
+             aes(xintercept = median),
+             linetype = "dashed", color = "red") +
+  labs(
+    title = "Rolling 3-Year Densities of Returns",
+    subtitle = "Comparing AI Impelementer, Benchmark, and Active Median Returns",
+    x = "Rolling Returns",
+    y = "Density",
+    fill = "Category"
+  ) +
+  theme_fmx()
+
+plotdens
+```
+
+## performance comparison
+
+```{r}
+
+idx <- AI_Fund %>%
+  rename(AI_Return = AI_Fund) %>%
+  left_join(BM %>% rename(BM_Return = Returns), by = "date") %>%
+  left_join(Active_Median %>% rename(Active_Median_Return = Median_Return), by = "date") %>% 
+  filter(date> lubridate::ymd(20061031))
+# Calculate excess returns relative to the benchmark
+relative_performance <- idx  %>%
+  mutate(
+    AI_vs_BM = AI_Return - BM_Return,           # AI Fund vs Benchmark
+    ASISA_vs_BM = Active_Median_Return - BM_Return # ASISA Median vs Benchmark
+  ) %>%
+  select(date, AI_vs_BM, ASISA_vs_BM)
+
+
+# Plot relative performance
+ggplot(relative_performance, aes(x = date)) +
+  geom_line(aes(y = AI_vs_BM, color = "AI Fund vs Benchmark"), size = 1.2) +
+  geom_line(aes(y = ASISA_vs_BM, color = "ASISA Median vs Benchmark"), size = 1.2) +
+  labs(
+    title = "Relative Performance of AI Fund and ASISA Median vs Benchmark",
+    subtitle = "Excess Returns Over the Benchmark",
+    x = "Date",
+    y = "Excess Returns",
+    color = "Legend"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r}
+# Add shading for outperformance
+g2 <-  relative_performance %>%
+  mutate(
+    AI_Outperform = ifelse(AI_vs_BM > 0, AI_vs_BM, NA),
+    ASISA_Outperform = ifelse(ASISA_vs_BM > 0, ASISA_vs_BM, NA)
+  ) %>%
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = AI_vs_BM, color = "AI Fund vs Benchmark"), size = 1.2) +
+  geom_line(aes(y = ASISA_vs_BM, color = "ASISA Median vs Benchmark"), size = 1.2) +
+  geom_area(aes(y = AI_Outperform, fill = "AI Outperformance"), alpha = 0.3) +
+  geom_area(aes(y = ASISA_Outperform, fill = "ASISA Outperformance"), alpha = 0.3) +
+  labs(
+    title = "Relative Performance of AI Fund and ASISA Median vs Benchmark",
+    subtitle = "Shaded Areas Indicate Outperformance Over the Benchmark",
+    x = "Date",
+    y = "Excess Returns",
+    color = "Legend",
+    fill = "Outperformance"
+  ) +
+  theme_minimal()
+```
+
+
+
+```{r}
+# Calculate proportions of outperformance
+proportions <- relative_performance %>%
+  summarise(
+    AI_Proportion = mean(AI_vs_BM > 0, na.rm = TRUE),
+    ASISA_Proportion = mean(ASISA_vs_BM > 0, na.rm = TRUE)
+  )
+print(proportions)
+```
+
+
+```{r}
+AI_Proportion <- proportions$AI_Proportion
+ASISA_Proportion <- proportions$ASISA_Proportion
+
+gg2 <- g2 + 
+  annotate(
+    "text",
+    x = as.Date("2015-01-01"), # Adjust x position as needed
+    y = max(relative_performance$AI_vs_BM, na.rm = TRUE) * 0.9, # Adjust y position as needed
+    label = paste0("AI Implementer > Benchmark: ", round(AI_Proportion * 100, 1), "%"),
+    hjust = 0, size = 5, color = "steelblue"
+  ) +
+  annotate(
+    "text",
+    x = as.Date("2015-01-01"), # Adjust x position as needed
+    y = max(relative_performance$ASISA_vs_BM, na.rm = TRUE) * 0.8, # Adjust y position as needed
+    label = paste0("Active Median > Benchmark: ", round(ASISA_Proportion * 100, 1), "%"),
+    hjust = 0, size = 5, color = "red"
+  )+ theme_fmx()
+```
+
+
+
+
+
+
+
 
 
 
@@ -27,6 +300,15 @@ Each answer is fully contained in a separate folder with relevant pdf outputs, c
 
 
 # QUESTION 4
+
+For this question I need to rebalance the stocks quarterly. 
+Let's make 4 slides.
+
+1) Show rolling downside risk
+2) Performance comparison
+3) Fund positioning 
+4) Performance attribution
+
 
 
 # QUESTION 5

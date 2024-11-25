@@ -3,7 +3,7 @@
 # Remove comments and add values where applicable.
 # The descriptions below should be self-explanatory
 
-title: "Question 4:"
+title: "Question 4: Portfolio Commentary"
 #subtitle: "This will appear as Right Header"
 
 documentclass: "elsarticle"
@@ -94,5 +94,24 @@ output:
 abstract: Here is a little something for the abstract
   
 ---
+
+
+```{r}
+
+library(tidyverse)
+library(PerformanceAnalytics)
+library(here)
+library(rmsfuns)
+
+
+
+
+Port_Holds <- read_rds(here("data", "Fund_Holds.rds"))
+Port_Rets <- read_rds(here("data", "Fund_Rets.rds"))
+BM_Holds <- read_rds(here("data", "BM_Holds.rds"))
+BM_Rets <- read_rds(here("data", "BM_Rets.rds"))
+```
+
+
 
 # Introduction {-}

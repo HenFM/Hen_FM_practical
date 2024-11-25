@@ -3,7 +3,7 @@
 # Remove comments and add values where applicable.
 # The descriptions below should be self-explanatory
 
-title: "Question 1: Report style test"
+title: "Question 1: Systematic AI Fund"
 #subtitle: "This will appear as Right Header"
 
 documentclass: "elsarticle"
