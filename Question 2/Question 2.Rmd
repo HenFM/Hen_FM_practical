@@ -95,6 +95,15 @@ abstract: Here is a little something for the abstract
   
 ---
 
+```{r}
+Indexes <- read_rds(here("data", "Cncy_Hedge_Assets.rds"))
+ZAR <- read_rds(here("data", "Monthly_zar.rds"))
+```
+
+
+
+
+
 # Introduction
 
 

@@ -3,7 +3,7 @@
 # Remove comments and add values where applicable.
 # The descriptions below should be self-explanatory
 
-title: "Question 3:"
+title: "Question 3: Portfolio Construction"
 #subtitle: "This will appear as Right Header"
 
 documentclass: "elsarticle"
@@ -94,5 +94,12 @@ output:
 abstract: Here is a little something for the abstract
   
 ---
+
+
+```{r}
+ALSI <- read_rds(here("data", "ALSI.rds"))
+RebDays <- read_rds(here("data", "Rebalance_days.rds"))
+```
+
 
 # Introduction {-}

@@ -3,7 +3,7 @@
 # Remove comments and add values where applicable.
 # The descriptions below should be self-explanatory
 
-title: "Question 5"
+title: "Question 5: Volatility and GARCH estimates"
 #subtitle: "This will appear as Right Header"
 
 documentclass: "elsarticle"
@@ -94,5 +94,13 @@ output:
 abstract: Here is a little something for the abstract
   
 ---
+
+```{r}
+cncy <- read_rds(here("data/currencies.rds"))
+cncy_Carry <- read_rds(here("data", "cncy Carry.rds"))
+cncy_value <- read_rds(here("data", "cncy value.rds"))
+cncyIV <- read_rds(here("data", "cncyIV.rds"))
+bbdxy <- read_rds(here("data", "bbdxy.rds"))
+```
 
 # Introduction {-}

@@ -3,7 +3,7 @@
 # Remove comments and add values where applicable.
 # The descriptions below should be self-explanatory
 
-title: "Question 6:"
+title: "Question 6: Portfolio Construction"
 #subtitle: "This will appear as Right Header"
 
 documentclass: "elsarticle"
@@ -94,5 +94,12 @@ output:
 abstract: Here is a little something for the abstract
   
 ---
+
+```{r}
+MAA <- read_rds(here("data", "MAA.rds"))
+msci <-read_rds(here("data", "msci.rds")) %>%
+filter(Name %in% c("MSCI ACWI", "MSCI USA", "MSCI RE", "MSCI Jap"))
+```
+
 
 # Introduction {-}

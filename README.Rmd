@@ -295,11 +295,29 @@ gg2 <- g2 +
 
 # QUESTION 2
 
+```{r}
+Indexes <- read_rds(here("data", "Cncy_Hedge_Assets.rds"))
+ZAR <- read_rds(here("data", "Monthly_zar.rds"))
+```
+
 
 # QUESTION 3
 
+```{r}
+ALSI <- read_rds(here("data", "ALSI.rds"))
+RebDays <- read_rds(here("data", "Rebalance_days.rds"))
+```
+
 
 # QUESTION 4
+
+```{r}
+Port_Holds <- read_rds(here("data", "Fund_Holds.rds"))
+Port_Rets <- read_rds(here("data", "Fund_Rets.rds"))
+BM_Holds <- read_rds(here("data", "BM_Holds.rds"))
+BM_Rets <- read_rds(here("data", "BM_Rets.rds"))
+```
+
 
 For this question I need to rebalance the stocks quarterly. 
 Let's make 4 slides.
@@ -313,5 +331,18 @@ Let's make 4 slides.
 
 # QUESTION 5
 
+```{r}
+cncy <- read_rds(here("data/currencies.rds"))
+cncy_Carry <- read_rds(here("data", "cncy Carry.rds"))
+cncy_value <- read_rds(here("data", "cncy value.rds"))
+cncyIV <- read_rds(here("data", "cncyIV.rds"))
+bbdxy <- read_rds(here("data", "bbdxy.rds"))
+```
 
 # QUESTION 6
+
+```{r}
+MAA <- read_rds(here("data", "MAA.rds"))
+msci <-read_rds(here("data", "msci.rds")) %>%
+filter(Name %in% c("MSCI ACWI", "MSCI USA", "MSCI RE", "MSCI Jap"))
+```
