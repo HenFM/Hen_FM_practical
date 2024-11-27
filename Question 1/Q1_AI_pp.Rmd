@@ -1,0 +1,251 @@
+---
+title: "AI Implementer: New Horizons"
+author: "HL VAN ZYL 17640296"
+date: "2024-11-26"
+output: powerpoint_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(here)
+
+wd <- "/Users/R/Hen_FM_practical"
+# load data
+ASISA <- read_rds(paste0(wd,"/data/ASISA_Rets.rds"))
+BM <- read_rds(paste0(wd, "/data/Capped_SWIX.rds"))
+AI_Fund <- read_rds(paste0(wd,"/data/AI_Max_Fund.rds"))
+
+ASISA <- ASISA %>% 
+  filter(Index == "No", FoF == "No") %>% select(-c(Index, FoF))
+BM <- BM %>% select(-Tickers)
+```
+
+
+## Introduction
+
+This presentation aims to show you that our AI implementer consistently outperforms the benchmark strategy as well as the median performance of our peers and that is before taking fees into account. 
+
+
+
+## Tyranny of fees
+
+* First let's demonstrate the destructive impact of fees on your long run cumulative returns
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Get median return for each month across all actively managed funds
+Active_Median <- ASISA %>%
+  group_by(date) %>%
+  summarise(Median_Return = median(Returns, na.rm = TRUE)) %>%
+  ungroup()
+
+source(paste0(wd, "/Question 1/code/Fee_comparison.R"))
+
+comp_plot <- Cum_Fee_Comparison(Active_Median %>% rename(Returns = Median_Return), Fee = 50*1e-4, Start = ymd(20100101), 
+                               # Added purely for figure adjustment:
+                               Gap = 3, Lvlset = 3,
+                               mnthfwd = 18)
+
+ggsave(paste0(wd, "/Question 1/plots/comp_plot.png"), plot = comp_plot, width = 10, height = 10, dpi = 300)
+```
+
+![](/Users/R/Hen_FM_practical/Question 1/plots/comp_plot.png)
+
+
+
+
+## Rolling Returns
+
+- Our fund consistently far outperforms the median actively managed funds BEFORE taking management fees into account
+
+
+- It is also consistently outperforms the benchmark strategy
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(RcppRoll)
+library(tidyverse)
+library(fmxdat)
+# Merge all data into a single dataframe
+Fund_ret <- AI_Fund %>%
+  rename(AI_Return = AI_Fund) %>%
+  left_join(BM %>% rename(BM_Return = Returns), by = "date") %>%
+  left_join(Active_Median %>% rename(Active_Median_Return = Median_Return), by = "date") %>%
+  pivot_longer(
+    cols = -date, 
+    names_to = "Tickers", 
+    values_to = "Returns"
+  )
+
+plotdf <-
+Fund_ret %>%
+    group_by(Tickers) %>%
+    # Epic sorcery:
+mutate(RollRets = RcppRoll::roll_prod(1 + Returns, 36, fill = NA,
+    align = "right")^(12/36) - 1) %>%
+    # Note this cool trick: it removes dates that have no
+    # RollRets at all.
+group_by(date) %>%
+    filter(any(!is.na(RollRets))) %>%
+    ungroup()
+
+g <-
+plotdf %>%
+    ggplot() + geom_line(aes(date, RollRets, color = Tickers),
+    alpha = 0.7, size = 1.25) + labs(title = "Rolling 3 Year Annualized Returns Comparison",
+    subtitle = "", x = "", y = "Rolling 3 year Returns (Ann.)",
+    caption = "Note: Active Median Return represents the median return for actively managed funds each month") + theme_fmx(title.size = ggpts(30),
+    subtitle.size = ggpts(5), caption.size = ggpts(25), CustomCaption = T) +
+    fmx_cols()
+
+gg <- fmxdat::finplot(g, x.date.dist = "1 year", x.date.type = "%Y", x.vert = T,
+    y.pct = T, y.pct_acc = 1)
+
+
+ggsave(paste0(wd, "/Question 1/plots/rolling.png"), plot = gg, width = 8, height = 6, dpi = 300)
+```
+
+![](/Users/R/Hen_FM_practical/Question 1/plots/rolling.png)
+
+
+
+## Rolling Densities
+
+- Here we can clearly see the median return of the AI implementer beats the benchmark and Actively managed funds
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+plotdens <- plotdf %>% 
+  filter(date > lubridate::ymd(20060101), Tickers != "Active_Mean_Return") %>% 
+  ggplot(aes(x = RollRets)) + 
+  geom_density(aes(fill = Tickers), alpha = 0.6) +
+  geom_vline(data = . %>% filter(Tickers == "AI_Return") %>% summarise(median = median(RollRets, na.rm = TRUE)),
+             aes(xintercept = median),
+             linetype = "dashed", color = "green") +
+  geom_vline(data = . %>% filter(Tickers == "BM_Return") %>% summarise(median = median(RollRets, na.rm = TRUE)),
+             aes(xintercept = median),
+             linetype = "dashed", color = "blue") +
+  geom_vline(data = . %>% filter(Tickers == "Active_Median_Return") %>% summarise(median = median(RollRets, na.rm = TRUE)),
+             aes(xintercept = median),
+             linetype = "dashed", color = "red") +
+  labs(
+    title = "Rolling 3-Year Densities of Returns",
+    subtitle = "Comparing AI Impelementer, Benchmark, and Active Median Returns",
+    x = "Rolling Returns",
+    y = "Density",
+    fill = "Category"
+  ) +
+  theme_fmx()
+
+plotdens
+
+ggsave(paste0(wd, "/Question 1/plots/dens.png"), plot = plotdens, width = 8, height = 6, dpi = 300)
+```
+
+![](/Users/R/Hen_FM_practical/Question 1/plots/dens.png)
+
+## Performance Comparison
+
+- This plot shows our AI implementer fund was able to outperform the benchmark in 57% of months
+
+- The Median Actively managed fund could only outperform the benchmark in 45% of months
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+idx <- AI_Fund %>%
+  rename(AI_Return = AI_Fund) %>%
+  left_join(BM %>% rename(BM_Return = Returns), by = "date") %>%
+  left_join(Active_Median %>% rename(Active_Median_Return = Median_Return), by = "date") %>% 
+  filter(date> lubridate::ymd(20061031))
+# Calculate excess returns relative to the benchmark
+relative_performance <- idx  %>%
+  mutate(
+    AI_vs_BM = AI_Return - BM_Return,           # AI Fund vs Benchmark
+    ASISA_vs_BM = Active_Median_Return - BM_Return # ASISA Median vs Benchmark
+  ) %>%
+  select(date, AI_vs_BM, ASISA_vs_BM)
+
+
+# Plot relative performance
+ggplot(relative_performance, aes(x = date)) +
+  geom_line(aes(y = AI_vs_BM, color = "AI Fund vs Benchmark"), size = 1.2) +
+  geom_line(aes(y = ASISA_vs_BM, color = "ASISA Median vs Benchmark"), size = 1.2) +
+  labs(
+    title = "Relative Performance of AI Fund and ASISA Median vs Benchmark",
+    subtitle = "Excess Returns Over the Benchmark",
+    x = "",
+    y = "Excess Returns",
+    color = "Legend"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Add shading for outperformance
+g2 <-  relative_performance %>%
+  mutate(
+    AI_Outperform = ifelse(AI_vs_BM > 0, AI_vs_BM, NA),
+    ASISA_Outperform = ifelse(ASISA_vs_BM > 0, ASISA_vs_BM, NA)
+  ) %>%
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = AI_vs_BM, color = "AI Fund vs Benchmark"), size = 1.2) +
+  geom_line(aes(y = ASISA_vs_BM, color = "ASISA Median vs Benchmark"), size = 1.2) +
+  geom_area(aes(y = AI_Outperform, fill = "AI Outperformance"), alpha = 0.3) +
+  geom_area(aes(y = ASISA_Outperform, fill = "ASISA Outperformance"), alpha = 0.3) +
+  labs(
+    title = "Relative Performance of AI Fund and ASISA Median vs Benchmark",
+    subtitle = "Shaded Areas Indicate Outperformance Over the Benchmark",
+    x = "",
+    y = "Excess Returns",
+    color = "Legend",
+    fill = "Outperformance"
+  ) +
+  theme_minimal()
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Calculate proportions of outperformance
+proportions <- relative_performance %>%
+  summarise(
+    AI_Proportion = mean(AI_vs_BM > 0, na.rm = TRUE),
+    ASISA_Proportion = mean(ASISA_vs_BM > 0, na.rm = TRUE)
+  )
+print(proportions)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+AI_Proportion <- proportions$AI_Proportion
+ASISA_Proportion <- proportions$ASISA_Proportion
+
+Rel_perf <- g2 + 
+  annotate(
+    "text",
+    x = as.Date("2015-01-01"), # Adjust x position as needed
+    y = max(relative_performance$AI_vs_BM, na.rm = TRUE) * 0.9, # Adjust y position as needed
+    label = paste0("AI Implementer > Benchmark: ", round(AI_Proportion * 100, 1), "%"),
+    hjust = 0, size = 5, color = "steelblue"
+  ) +
+  annotate(
+    "text",
+    x = as.Date("2015-01-01"), # Adjust x position as needed
+    y = max(relative_performance$ASISA_vs_BM, na.rm = TRUE) * 0.8, # Adjust y position as needed
+    label = paste0("ASISA Median > Benchmark: ", round(ASISA_Proportion * 100, 1), "%"),
+    hjust = 0, size = 5, color = "red"
+  )+ theme_fmx()
+
+
+
+ggsave(paste0(wd, "/Question 1/plots/rel_perf.png"), plot = Rel_perf, width = 8, height = 6, dpi = 300)
+
+```
+
+
+![](/Users/R/Hen_FM_practical/Question 1/plots/rel_perf.png)
+
+
+
+

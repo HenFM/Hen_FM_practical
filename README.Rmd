@@ -6,7 +6,7 @@ output: github_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message=FALSE, warning=FALSE)
 ```
 
 
@@ -16,7 +16,6 @@ rm(list = ls()) # Clean your environment:
 gc() # garbage collection
 library(here)
 library(fmxdat)
-
 library(tbl2xts)
 ```
 
@@ -30,6 +29,9 @@ Each answer is fully contained in a separate folder with relevant pdf outputs, c
 # QUESTION 1: Systematic AI Fund
 
 Goal: Compare our AI fund to benchmark (capped SWIX) and actively managed funds of industry peers (ASISA) after costs using visualizations in a powerpoint. 
+
+After having looked at the data it is clear that the AI fund will outperform the Median Active manager
+
 How:  
 * Cumulative returns (annualized) using a 3 year month rolling window 
 * Show how rolling distributions of funds compare
@@ -40,13 +42,13 @@ How:
 I see no info on costs for ASISA funds are available so I will argue that if our returns are comparable then clearly the AI fund has outperformed because costs still need to be deducted from the ASISA returns. 
 
 ## Data exploration
-```{r}
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 library(tidyverse)
 
 # load data
-ASISA <- read_rds(here("data","ASISA_Rets.rds"))
-BM <- read_rds(here("data", "Capped_SWIX.rds"))
-AI_Fund <- read_rds(here("data","AI_Max_Fund.rds"))
+ASISA_raw <- read_rds(here("data","ASISA_Rets.rds"))
+BM_raw <- read_rds(here("data", "Capped_SWIX.rds"))
+AI_Fund_raw <- read_rds(here("data","AI_Max_Fund.rds"))
 
 
 ```
@@ -54,17 +56,17 @@ AI_Fund <- read_rds(here("data","AI_Max_Fund.rds"))
 Let's check the data. Do we have NAs? What is the frequency? 
 
 ```{r}
-AI_Fund %>% 
+AI_Fund_raw %>% 
   summarise(NA_Count = sum(is.na(AI_Fund)))
 
 # 0 NAs
 
-BM %>% 
+BM_raw %>% 
   summarise(NA_Count = sum(is.na(Returns)))
 
 # 0 NAs 
 
-sum(is.na(ASISA$Returns))
+sum(is.na(ASISA_raw$Returns))
 
 # 0 NAs
 
@@ -84,12 +86,12 @@ No NAs. Monthly frequency. Let's filter for non-indices in ASISA as we only want
 
 
 ```{r}
-ASISA <- ASISA %>% 
+ASISA <- ASISA_raw %>% 
   filter(Index == "No", FoF == "No") %>% select(-c(Index, FoF))
 
 
 
-BM <- BM %>% select(-Tickers)
+BM <- BM_raw %>% select(-Tickers)
 
 # How many funds are there?
 
@@ -101,18 +103,37 @@ BM <- BM %>% select(-Tickers)
   
 ```
 
+## Tyranny of Fees
 
+Use Cum_Fee_Comparison function from `code` folder to demonstrate impact of varying levels of fees on actively managed funds. 
 
+From this basis I can argue that if the AI Implementer equals the performance of actively managed funds then it should clearly be the preferred option as it does not incur these fees. 
 
-
-```{r}
-library(RcppRoll)
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 # Get median return for each month across all actively managed funds
 ASISA_Median <- ASISA %>%
   group_by(date) %>%
   summarise(Median_Return = median(Returns, na.rm = TRUE)) %>%
   ungroup()
 
+source(here("Question 1/code/Fee_comparison.R"))
+
+Cum_Fee_Comparison(ASISA_Median %>% rename(Returns = Median_Return), Fee = 50*1e-4, Start = ymd(20100101), 
+                               # Added purely for figure adjustment:
+                               Gap = 3, Lvlset = 3,
+                               mnthfwd = 18)
+```
+
+
+## Rolling Returns
+
+Rolling returns is a nice easy visual way to compare returns. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(RcppRoll)
+
+AI_Fund <- AI_Fund_raw
+Active_Median <- ASISA_Median
 # Merge all data into a single dataframe
 Fund_ret <- AI_Fund %>%
   rename(AI_Return = AI_Fund) %>%
@@ -139,9 +160,9 @@ g <-
 Roll_ret %>%
     filter(date > lubridate::ymd(20051231)) %>% 
     ggplot() + geom_line(aes(date, RollRets, color = Tickers),
-    alpha = 0.7, size = 1.25) + labs(title = "Illustration of Rolling 3 Year Annualized Returns of various Indices with differing start dates",
+    alpha = 0.7, size = 1.25) + labs(title = "Rolling 3 Year Annualized Returns Comparison",
     subtitle = "", x = "", y = "Rolling 3 year Returns (Ann.)",
-    caption = "") + theme_fmx(title.size = ggpts(30),
+    caption = "Note: Active Median Return represents the median return for actively managed funds each month") + theme_fmx(title.size = ggpts(30),
     subtitle.size = ggpts(5), caption.size = ggpts(25), CustomCaption = T) +
     fmx_cols()
 
@@ -149,14 +170,19 @@ ret_rol_plot <- fmxdat::finplot(g, x.date.dist = "1 year", x.date.type = "%Y", x
     y.pct = T, y.pct_acc = 1)
 
 ret_rol_plot
-
 ```
 
+## Annualized Return and Risk
 
-```{r}
+I decided against using this plot as using the Median of active funds hides the underlying risky-ness of the stocks that comprise it.
+
+If I have more time I would add a few random stocks that are in the top 25% of returns to compared in a plot like this
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 library(tbl2xts)
 library(PerformanceAnalytics)
-xts.returns <- funds_ret %>% tbl_xts(tblData = ., cols_to_xts = Returns, spread_by = Tickers)
+xts.returns <- Fund_ret %>% tbl_xts(tblData = ., cols_to_xts = Returns, spread_by = Tickers)
 chart.RiskReturnScatter(R=xts.returns['2006-01-01/'][,c("AI_Return", "BM_Return", "Active_Median_Return")])
 ```
 
@@ -166,9 +192,9 @@ chart.RiskReturnScatter(R=xts.returns['2006-01-01/'][,c("AI_Return", "BM_Return"
 
 I want to replicate the figure in the question, which illustrates the overlapping densities for each funds density and marks the median. I do this using geom_density function
 
-```{r}
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 
-plotdens <- plotdf %>% 
+plotdens <- Roll_ret %>% 
   filter(date > lubridate::ymd(20060101), Tickers != "Active_Mean_Return") %>% 
   ggplot(aes(x = RollRets)) + 
   geom_density(aes(fill = Tickers), alpha = 0.6) +
@@ -195,7 +221,9 @@ plotdens
 
 ## performance comparison
 
-```{r}
+First get the relative performance, I'm keeping this simple, just the difference between the respective fund and the benchmark at each point in time. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 
 idx <- AI_Fund %>%
   rename(AI_Return = AI_Fund) %>%
@@ -204,30 +232,34 @@ idx <- AI_Fund %>%
   filter(date> lubridate::ymd(20061031))
 # Calculate excess returns relative to the benchmark
 relative_performance <- idx  %>%
+  group_by(date) %>% 
   mutate(
     AI_vs_BM = AI_Return - BM_Return,           # AI Fund vs Benchmark
     ASISA_vs_BM = Active_Median_Return - BM_Return # ASISA Median vs Benchmark
   ) %>%
-  select(date, AI_vs_BM, ASISA_vs_BM)
+  select(date, AI_vs_BM, ASISA_vs_BM) %>% 
+  ungroup()
 
 
-# Plot relative performance
-ggplot(relative_performance, aes(x = date)) +
-  geom_line(aes(y = AI_vs_BM, color = "AI Fund vs Benchmark"), size = 1.2) +
-  geom_line(aes(y = ASISA_vs_BM, color = "ASISA Median vs Benchmark"), size = 1.2) +
-  labs(
-    title = "Relative Performance of AI Fund and ASISA Median vs Benchmark",
-    subtitle = "Excess Returns Over the Benchmark",
-    x = "Date",
-    y = "Excess Returns",
-    color = "Legend"
-  ) +
-  theme_minimal()
+# # Plot relative performance
+# ggplot(relative_performance, aes(x = date)) +
+#   geom_line(aes(y = AI_vs_BM, color = "AI Fund vs Benchmark"), size = 1.2) +
+#   geom_line(aes(y = ASISA_vs_BM, color = "ASISA Median vs Benchmark"), size = 1.2) +
+#   labs(
+#     title = "Relative Performance of AI Fund and ASISA Median vs Benchmark",
+#     subtitle = "Excess Returns Over the Benchmark",
+#     x = "",
+#     y = "Excess Returns",
+#     color = "Legend"
+#   ) +
+#   theme_minimal()
 
 
 ```
 
-```{r}
+Some initial plot setup
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 # Add shading for outperformance
 g2 <-  relative_performance %>%
   mutate(
@@ -242,7 +274,7 @@ g2 <-  relative_performance %>%
   labs(
     title = "Relative Performance of AI Fund and ASISA Median vs Benchmark",
     subtitle = "Shaded Areas Indicate Outperformance Over the Benchmark",
-    x = "Date",
+    x = "",
     y = "Excess Returns",
     color = "Legend",
     fill = "Outperformance"
@@ -250,9 +282,9 @@ g2 <-  relative_performance %>%
   theme_minimal()
 ```
 
+calculate proportions of outperformance. 
 
-
-```{r}
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 # Calculate proportions of outperformance
 proportions <- relative_performance %>%
   summarise(
@@ -262,8 +294,8 @@ proportions <- relative_performance %>%
 print(proportions)
 ```
 
-
-```{r}
+Add outperformance to existing plot. 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 AI_Proportion <- proportions$AI_Proportion
 ASISA_Proportion <- proportions$ASISA_Proportion
 
@@ -279,9 +311,11 @@ gg2 <- g2 +
     "text",
     x = as.Date("2015-01-01"), # Adjust x position as needed
     y = max(relative_performance$ASISA_vs_BM, na.rm = TRUE) * 0.8, # Adjust y position as needed
-    label = paste0("Active Median > Benchmark: ", round(ASISA_Proportion * 100, 1), "%"),
+    label = paste0("ASISA Median > Benchmark: ", round(ASISA_Proportion * 100, 1), "%"),
     hjust = 0, size = 5, color = "red"
   )+ theme_fmx()
+
+gg2
 ```
 
 
@@ -311,7 +345,7 @@ RebDays <- read_rds(here("data", "Rebalance_days.rds"))
 
 # QUESTION 4
 
-```{r}
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 Port_Holds <- read_rds(here("data", "Fund_Holds.rds"))
 Port_Rets <- read_rds(here("data", "Fund_Rets.rds"))
 BM_Holds <- read_rds(here("data", "BM_Holds.rds"))
@@ -319,30 +353,629 @@ BM_Rets <- read_rds(here("data", "BM_Rets.rds"))
 ```
 
 
-For this question I need to rebalance the stocks quarterly. 
-Let's make 4 slides.
+Check that there are no NAs 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+Port_Holds %>% select(Weight) %>% is.na() %>% sum()
+Port_Holds %>% select(Tickers) %>% is.na() %>% sum()
+Port_Rets %>% select(Returns) %>% is.na() %>% sum()
+BM_Rets %>% select(BM) %>% is.na() %>% sum()
 
-1) Show rolling downside risk
-2) Performance comparison
-3) Fund positioning 
-4) Performance attribution
+
+# There are no NAs
+# the dates 
+```
+
+Let's create one df from the returns data and use the financial stats function from the practical to create a table of summary statistics
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+# Check if the date columns are identical
+# identical(Port_Rets$date, BM_Rets$date)
+
+# True so safe to merge
+
+library(tidyverse)
+library(fmxdat)
+library(lubridate)
+library(xts)
+library(tbl2xts)
+
+# some initial setup
+
+Snake_Oil_Rets <- Port_Rets %>% 
+  select(-Portolio)
+
+
+Funds <- Snake_Oil_Rets %>% 
+  rename(Snake_Oil_Returns = Returns) %>% 
+  left_join(BM_Rets, by = "date") %>% 
+  filter(date>first(date)) %>% 
+  pivot_longer(-date, names_to = "Tickers", values_to = "Ret")
+
+
+
+  
+```
+
+
+
+## Stats table
+
+Create a table of financial statistics using practical function to create the table, function stored in `code`.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(gt)
+source(here("Question 4/code/4.1_Mom_Comp_func.R"))
+
+Tab_stats <- Moments_Comp(Funds, "BM", 5, 0.8)
+
+Make_perc <- 
+  
+  c( "Cum Returns", "Returns (Ann.)", "Returns Excess (Ann.)", "SD (Ann.)",
+     "Avg DD", "Tracking Error")
+
+Rows_to_Perc <- 
+  
+  Tab_stats %>% mutate(RN=row_number()) %>% filter(Info %in% Make_perc) %>% pull(RN)
+
+colnams <- colnames(Tab_stats)[-1:-2]
+
+Cols_length <- ncol(Tab_stats)
+
+tab <- 
+  
+  Tab_stats %>% 
+  
+  gt::gt(groupname_col = 'Period', caption = 'SnakeOilCapital Moments Comparison') %>% 
+  
+  # Set a dynamic title with the benchmark name
+  tab_header(title = "Index Statistics: Relative to Benchmark") %>% 
+  
+  # Format percentage rows
+  fmt_percent(
+    columns = 3:Cols_length,
+    rows = Rows_to_Perc,
+    decimals = 1
+  ) %>%   
+  
+  # Replace missing values with a cleaner text or leave blank
+  sub_missing(
+    columns = all_of(colnams),
+    missing_text = "N/A"
+  ) %>%
+  
+  # Style the row group headers
+  tab_style(
+    style = list(
+      cell_fill(color = 'lightgray', alpha = 0.1),
+      cell_text(size = 'large', weight = 'bold', align = 'center')
+    ),
+    locations = cells_row_groups()
+  ) %>% 
+  
+  # Style and align the column headers
+  tab_style(
+    style = cell_text(weight = 'bold', align = 'center', size = 'medium'), 
+    locations = cells_column_labels(everything())
+  ) %>%
+  
+  # Align all data cells in columns to center
+  tab_style(
+    style = cell_text(align = 'center'),
+    locations = cells_body(columns = everything())
+  ) %>%
+  
+  # Improve overall table options
+  tab_options(
+    table.width = pct(100),
+    table.font.size = px(12),
+    column_labels.font.size = px(14),
+    data_row.padding = px(6),
+    column_labels.vlines.width = 1
+  )
+
+# To save this, use:
+gt::gtsave(tab, file = '/Users/R/Hen_FM_practical/Question 4/plots/Tab.png')
+
+# In your rmd, you can now reference it using:
+# ![]('Results/TempTab.png'))
+
+tab
+```
+
+
+## Data investigation
+
+BM_Holds maps `Tickers` to `Sectors`, while Port_Holds only has `Tickers`, let's check if all `Port_Holds$Tickers` are contained in BM_Holds.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+unmatched_tickers <- setdiff(Port_Holds$Tickers, BM_Holds$Tickers)
+unmatched_tickers
+```
+
+Identical, that means I can map from the one to the other
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Add Sector information to Port_Holds
+Port_Holds_with_Sectors <- Port_Holds %>%
+  left_join(
+    BM_Holds %>% select(Tickers, Sector) %>% distinct(),
+    by = "Tickers", relationship = "many-to-many"
+  ) %>% 
+  mutate(YM = format(date, "%Y %B"))
+
+month_totals <- Port_Holds_with_Sectors %>% 
+  group_by(YM) %>% 
+  summarise(month_weight = sum(Weight))
+
+head(month_totals, 5)
+```
+
+Month totals not adding to one, this is suspicious. 
+
+I was having some trouble mapping the BM_Holds Sectors to Port_Holds Tickers, Turns out some Tickers are associated with more than 1 Sector
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Check if each Ticker maps uniquely to one Sector
+ticker_to_sector <- BM_Holds %>%
+  group_by(Tickers) %>%
+  summarize(unique_sectors = n_distinct(Sector)) %>%
+  filter(unique_sectors > 1)
+
+ticker_to_sector
+```
+
+AFT, L4L and MNP were associated with 2 sectors each, I check each stock on Listcorp.com on the internet to see which sector is most appropriate. 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+BM_Holds %>% filter(Tickers == "AFT") %>% select(Sector, name) %>% unique()
+# I'm going to set AFT to industrials
+
+BM_Holds %>% filter(Tickers == "L4L") %>% select(Sector, name) %>% unique()
+# L4L to financials
+BM_Holds %>% filter(Tickers == "MNP") %>% select(Sector, name) %>% unique()
+# resources
+
+```
+
+Ensure consistency of Ticker to sector mapping 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Update the Sector column in BM_Holds
+BM_Holds <- BM_Holds %>%
+  mutate(
+    Sector = case_when(
+      Tickers == "AFT" ~ "Industrials",
+      Tickers == "L4L" ~ "Financials",
+      Tickers == "MNP" ~ "Resources",
+      TRUE ~ Sector  # Keep the existing value for all other Tickers
+    )
+  )
+
+# that seems to have worked 
+
+```
+Let's recheck the monthly weights and see if they add to one now:
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Add Sector information to Port_Holds
+Port_Holds_with_Sectors <- Port_Holds %>%
+  left_join(
+    BM_Holds %>% select(Tickers, Sector) %>% distinct(),
+    by = "Tickers", relationship = "many-to-many"
+  ) %>% 
+  mutate(YM = format(date, "%Y %B"))
+
+month_totals <- Port_Holds_with_Sectors %>% 
+  group_by(YM) %>% 
+  summarise(month_weight = sum(Weight))
+
+month_totals %>% select(month_weight) %>% unique()
+```
+
+Great they add to one now.
+
+## Performance comparison
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(PerformanceAnalytics)
+df <- Port_Holds_with_Sectors %>% 
+  left_join(Port_Rets %>% select(date, Returns), by = "date") %>% 
+  group_by(date, Tickers) %>% 
+  mutate(contribution = Weight*Returns) %>% 
+  ungroup()
+
+df %>% select(Sector) %>% unique()
+
+# Top stock contributors/detractors
+stock_contribution <- df %>%
+  group_by(date, Tickers) %>%
+  summarize(Contribution = sum(Weight * Returns, na.rm = TRUE), .groups = "drop")
+
+
+```
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Filter data for the last year
+last_year <- max(stock_contribution$date) - years(3)
+
+top_contributors <- stock_contribution %>%
+  filter(date > last_year) %>%                # Include only data from the last year
+  group_by(Tickers) %>%
+  summarize(Contribution = sum(Contribution, na.rm = TRUE)) %>%  # Sum contributions over the year
+  arrange(desc(Contribution)) %>%
+  slice(1:5) %>%
+  mutate(Group = "Top Contributors")
+
+top_detractors <- stock_contribution %>%
+  filter(date > last_year) %>%                # Include only data from the last year
+  group_by(Tickers) %>%
+  summarize(Contribution = sum(Contribution, na.rm = TRUE)) %>%  # Sum contributions over the year
+  arrange(Contribution) %>%                   # Sort in ascending order
+  slice(1:5) %>%
+  mutate(Group = "Bottom Contributors")
+
+# Combine contributors and detractors into a single table
+top_combined <- bind_rows(top_contributors, top_detractors) %>%
+  select(Stock = Tickers, Contribution, Group)
+
+# Create the gt table
+top_combined_gt <- top_combined %>%
+  gt(groupname_col = "Group") %>%
+  tab_header(
+    title = "Top and Bottom 5 Contributors to Returns in the Last 3 Years"
+  ) %>%
+  fmt_percent(
+    columns = "Contribution",  # Format the Contribution column as percentages
+    decimals = 2
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = everything()
+  ) %>%
+  tab_options(
+    table.width = pct(100),
+    heading.align = "center"
+  )
+
+# Render the table
+top_combined_gt
+
+# gt::gtsave(top_combined_gt, file = '/Users/R/Hen_FM_practical/Question 4/plots/comb.png')
+```
+
+## Performance analytics package
+
+Here I do the necessary setup to be able to use the canned PA functions.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+test <- df %>% select(date, Tickers, contribution)
+
+pacman::p_load("PerformanceAnalytics")
+
+# Now we use the Safe_Return.portfolio function from PerformanceAnalytics
+# Note, as with most PA functions, the inputs are xts and wide...
+# Also, let's assume you are investing R1000 at the start:
+Fund_Size_at_Start <- 1000
+
+df_weight <- df %>% 
+  select(date, Tickers, Weight) %>% 
+  pivot_wider(, names_from = Tickers, values_from = Weight)
+
+df_weight[is.na(df_weight)] <- 0
+weights <- df_weight %>% tbl_xts()
+  
+
+
+df_Returns <- df %>% select(date, Tickers, Returns) %>% 
+  pivot_wider(, names_from = Tickers, values_from = Returns)
+
+df_Returns[is.na(df_Returns)] <- 0
+xts_df_Returns <- df_Returns %>% tbl_xts()
+
+    RetPort <- 
+      rmsfuns::Safe_Return.portfolio(xts_df_Returns, 
+                                     
+                       weights = weights, lag_weights = TRUE,
+                       
+                       verbose = TRUE, contribution = TRUE, 
+                       
+                       value = Fund_Size_at_Start, geometric = TRUE) 
+    
+    # Clean and save portfolio returns and weights:
+Contribution <- RetPort$"contribution" %>% xts_tbl() 
+
+BPWeight <- RetPort$"BOP.Weight" %>% xts_tbl() 
+
+BPValue <- RetPort$"BOP.Value" %>% xts_tbl()  
+
+    names(Contribution) <- c("date", names(RetPort$"contribution"))
+    names(BPWeight) <- c("date", names(RetPort$"BOP.Weight"))
+    names(BPValue) <- c("date", names(RetPort$"BOP.Value"))
+
+
+    # Let's bind all of these together now:
+    
+    df_port_return <- 
+      left_join(df %>% select(date, Tickers, Returns),
+                BPWeight %>% gather(Tickers, Weight, -date),
+                by = c("date", "Tickers") ) %>% 
+      
+      left_join(.,
+                BPValue %>% gather(Tickers, value_held, -date),
+                by = c("date", "Tickers") ) %>% 
+      
+      left_join(.,
+                Contribution %>% gather(Tickers, Contribution, -date),
+                by = c("date", "Tickers"))
+    
+    # Calculate Portfolio Returns:
+df_Portf <- 
+    df_port_return %>% group_by(date) %>% summarise(PortfolioReturn = sum(Returns*Weight, na.rm =TRUE)) %>% 
+      filter(PortfolioReturn != 0)
+
+
+
+Cum_SO  <- 
+df_Portf %>%
+    mutate(SnakeOilCap = (cumprod(1 + PortfolioReturn))) %>% 
+  # Start at 1
+  mutate(SnakeOilCap = SnakeOilCap / first(SnakeOilCap)) %>% select(-PortfolioReturn)
+
+Cum_BM <- BM_Rets %>% 
+  mutate(Benchmark = (cumprod(1 + BM))) %>% 
+  # Start at 1
+  mutate(Benchmark = Benchmark / first(Benchmark)) %>% select(-BM)
+
+Cum_Comp <- 
+  left_join(Cum_SO, Cum_BM, by = "date") %>% gather(Type, Value, -date)
+
+
+
+cumplot <- Cum_Comp %>% 
+  group_by(Type) %>% 
+  ggplot() +
+  geom_line(aes(date, Value, color = Type)) +
+  theme_bw() +
+  labs(
+    title = "Cumulative Wealth Index",  # Add the title
+    x = "",                             # Empty x-axis label
+    y = "Index"                         # y-axis label
+  ) +
+  scale_color_discrete(name = "")  # Make the legend title empty
+
+# ggsave(here("Question 4/plots/cumplot.png"), plot = cumplot, width = 8, height = 5, dpi = 300)
+
+cumplot
+
+```
+
+
+```{r message=FALSE, warning=FALSE}
+stock_plot <- BPWeight %>% tbl_xts() %>% .[endpoints(.,'months')] %>% chart.StackedBar()
+
+## Specify the file name and dimensions for the PNG
+#png(filename = "/Users/R/Hen_FM_practical/Question 4/plots/stock_plot.png", width = 800, height = 600)
+#
+## Generate the plot
+#BPWeight %>% 
+#  tbl_xts() %>% 
+#  .[endpoints(., 'months')] %>% 
+#  chart.StackedBar()
+#
+## Close the graphics device
+#dev.off()
+
+stock_plot
+```
+
+```{r}
+VaR_plot <- chart.VaRSensitivity(R = df_Portf%>% tbl_xts(),
+                     main = "VaR Sensitivity Plot",
+                     methods=c("HistoricalVaR", "ModifiedVaR","GaussianVaR"),
+                     colorset=bluefocus, lwd=2)
+
+## Specify the file name and dimensions for the PNG
+#png(filename = "/Users/R/Hen_FM_practical/Question 4/plots/VaR.png", width = 800, height = 600)
+#
+#chart.VaRSensitivity(R = df_Portf%>% tbl_xts(),
+#                     main = "VaR Sensitivity Plot",
+#                     methods=c("HistoricalVaR", "ModifiedVaR","GaussianVaR"),
+#                     colorset=bluefocus, lwd=2)
+#
+## Close the graphics device
+#dev.off()
+
+VaR_plot
+```
+
+
+```{r}
+rol_var <- chart.BarVaR(df_Portf %>% tbl_xts(),
+             main = "Data vs Empirical VaR using rolling approach",
+             methods="HistoricalVaR")
+
+
+# # Specify the file name and dimensions for the PNG
+# png(filename = "/Users/R/Hen_FM_practical/Question 4/plots/rolvar.png", width = 800, height = 600)
+# 
+# chart.BarVaR(df_Portf %>% tbl_xts(),
+#              main = "Data vs Empirical VaR using rolling approach",
+#              methods="HistoricalVaR")
+# 
+# # Close the graphics device
+# dev.off()
+
+rol_var
+```
+
+
+
+
+```{r}
+sector_weights <- df %>%
+  group_by(date, Sector) %>% 
+  summarise(Sector_weight = sum(Weight))
+
+
+# Create the stacked bar chart
+h <- ggplot(sector_weights, aes(x = date, y = Sector_weight, fill = Sector)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +  
+  theme_minimal() +
+  labs(
+    title = "SnakeOilCapital Composition over time",
+    x = "",
+    y = "Sector Weight",
+    fill = ""
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for clarity
+    legend.position = "bottom"  # Place the legend at the bottom
+  )
+
+sector_plot <- fmxdat::finplot(h, x.date.dist = "1 year", x.date.type = "%Y", x.vert = T,
+    y.pct = T, y.pct_acc = 1)
+
+# ggsave(here("Question 4/plots/sect.png"), plot = sector_plot, width = 8, height = 5, dpi = 300)
+
+sector_plot
+
+```
+
+
+```{r}
+
+combo_df <- Port_Rets %>% 
+  select(-Portolio) %>% rename(SnakeOil = Returns) %>% 
+  left_join(BM_Rets %>% rename(Benchmark = BM), by = "date") %>% 
+  pivot_longer(-date, names_to = "Fund", values_to = "Returns") %>% 
+  group_by(Fund) %>% 
+  mutate(RollSD = RcppRoll::roll_sd(1 + Returns, 24, fill = NA, align = "right") *
+    sqrt(12)) %>%
+    filter(!is.na(RollSD))
+
+i <- combo_df %>%
+    ggplot() + geom_line(aes(date, RollSD, color = Fund),
+    alpha = 0.7, size = 1.25) + labs(title = "Rolling 2 Year Annualized Standard Devation Comparison",
+    subtitle = "", x = "", y = "Rolling 2 year Returns (Ann.)",
+    caption = "Note:") + theme_fmx(title.size = ggpts(30),
+    subtitle.size = ggpts(5), caption.size = ggpts(25), CustomCaption = T) +
+    fmx_cols()
+
+roll_sd <- finplot(i, x.date.dist = "1 year", x.date.type = "%Y", x.vert = T,
+    y.pct = T, y.pct_acc = 1)
+
+roll_sd
+
+# ggsave(here("Question 4/plots/rollsd.png"), plot = roll_sd, width = 8, height = 5, dpi = 300)
+  
+```
+
+```{r}
+pacman::p_load(PortRisk)
+
+# First get the contributions to overall portfolio return made by each stock:
+Contribution <- RetPort$"contribution" %>% xts_tbl()
+
+# # Notice that this adds up to the portfolio return at each date:
+# left_join(Contribution %>% gather(Stocks, RetCont, -date) %>% group_by(date) %>% summarise(Verify_Ret = sum(RetCont)), 
+#           RetPort$returns %>% xts_tbl, by = "date") %>% mutate(Diff = round(Verify_Ret - portfolio.returns, 5))
+```
+
+
+## Highest contributors to portfolio risk
+
+```{r}
+# Now, let's consider the highest to lowest contributors to portfolio risk using ES (Expected Tail Loss or ETL):
+ES_Risk_Contributors <- ETL(Contribution %>% tbl_xts(), portfolio_method="component") %>% 
+  
+  .$pct_contrib_MES %>% data.frame(Risk_Contrib = .) %>% 
+  
+  tibble::rownames_to_column("Tickers") %>% arrange(desc(Risk_Contrib))# %>% 
+
+    #print(ES_Risk_Contributors)
+    
+toprisk <- head(ES_Risk_Contributors, 10)
+
+BM_names_tick <- BM_Holds %>% 
+  select(Tickers, name) %>% 
+  mutate(name = case_when(Tickers == "BHG" ~ "BHP Group Limited",
+                                                     TRUE ~ name))
+
+toprisk_tab <- left_join(toprisk, BM_names_tick, by = "Tickers") %>% 
+  unique() %>% select(Stock = name, "Risk Contribution" = Risk_Contrib)
+
+
+# Render the table with gt
+toprisk_gt <- toprisk_tab %>%
+  gt() %>%
+  tab_header(
+    title = "Top 10 Expected Shortfall Risk contributors"  # Add the table title
+  ) %>%
+  fmt_percent(
+    columns = "Risk Contribution",  # Format the "Risk Contribution" column as percentages
+    decimals = 2
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = everything()  # Center align all columns
+  ) %>%
+  tab_options(
+    table.width = pct(100),  # Set table width to fill the slide/page
+    heading.align = "center"  # Center align the title
+  )
+
+# Print the table
+toprisk_gt
+
+#gt::gtsave(toprisk_gt, file = '/Users/R/Hen_FM_practical/Question 4/plots/toprisk.png')
+    
+
+```
+
+```{r}
+tabdownside <-
+  table.DownsideRisk(left_join(df_Portf %>% rename("SnakeOil" = PortfolioReturn), 
+                               BM_Rets %>% rename("Benchmark" = BM), 
+                               by = "date") %>% tbl_xts(.), 
+                     ci = 0.95, Rf=0, MAR=0)
+# Suppose I am only interested in specific elements of the table, then use:
+tabdownside <- tabdownside[c(1,5,7,8:11),]
+ 
+
+DownsideRiskEst <- tabdownside %>% data.frame() %>% tibble::rownames_to_column() %>% 
+gt() %>% 
+        tab_header(title = glue::glue("Downside Risk estimates")) %>% 
+      fmt_percent(
+      columns = 2:3,
+      decimals = 2
+    )
+
+DownsideRiskEst
+
+# gt::gtsave(DownsideRiskEst, file = '/Users/R/Hen_FM_practical/Question 4/plots/downrisk.png')
+```
+
+
 
 
 
 # QUESTION 5
 
 ```{r}
-cncy <- read_rds(here("data/currencies.rds"))
-cncy_Carry <- read_rds(here("data", "cncy Carry.rds"))
-cncy_value <- read_rds(here("data", "cncy value.rds"))
-cncyIV <- read_rds(here("data", "cncyIV.rds"))
-bbdxy <- read_rds(here("data", "bbdxy.rds"))
+#cncy <- read_rds(here("data/currencies.rds"))
+#cncy_Carry <- read_rds(here("data", "cncy Carry.rds"))
+#cncy_value <- read_rds(here("data", "cncy value.rds"))
+#cncyIV <- read_rds(here("data", "cncyIV.rds"))
+#bbdxy <- read_rds(here("data", "bbdxy.rds"))
 ```
 
 # QUESTION 6
 
 ```{r}
-MAA <- read_rds(here("data", "MAA.rds"))
-msci <-read_rds(here("data", "msci.rds")) %>%
-filter(Name %in% c("MSCI ACWI", "MSCI USA", "MSCI RE", "MSCI Jap"))
+#MAA <- read_rds(here("data", "MAA.rds"))
+#msci <-read_rds(here("data", "msci.rds")) %>%
+#filter(Name %in% c("MSCI ACWI", "MSCI USA", "MSCI RE", "MSCI Jap"))
 ```

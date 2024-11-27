@@ -1,0 +1,102 @@
+---
+title: "SnakeOil Capital"
+author: "HL VAN ZYL 17640296"
+date: "2024-11-27"
+output: powerpoint_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r}
+
+```
+
+## Introduction
+
+- SnakeOil Capital is a long-only domestic equity strategy that tracks the FTSE/JSE Capped SWIX.
+- This presentation aims to provide clients with some perspective on relative risk, performance and fund positioning.
+
+## Broad summary
+
+Here are a few important metrics to note regarding the performance of SnakeOil relative to the benchmark over the past 5 years.
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/Tab.png)
+
+## Performance
+
+-Let's look at the relative performance of cumulative returns.
+-It seems SnakeOil's Strategy worked well during times of uncertainty (Covid).
+-Once the economy returned to normality the benchmark started to outperform.
+
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/cumplot.png)
+
+
+## Contributors to cumulative Returns
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/comb.png)
+
+## Fund Positioning
+
+-This provides an idea of the systematic reweighting across sectors.
+-Financials have increased and resources have decreased in relative weighting in the last 6 months.
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/sect.png)
+
+
+## Fund Positioning
+
+-This illustrates how the composition of stocks in the SnakeOil portfolio have been updated over time
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/stock_plot.png)
+ 
+
+## Risk Measures
+
+-This supports the earlier claim that the SnakeOil Fund had comparatively lower volatility during a period of high uncertainty in global market (Covid)
+
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/rollsd.png)
+## Top Contributors to risk
+
+These 10 Stocks contributed most to Expected shortfall during the last 5 years.
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/toprisk.png)
+
+
+
+## Downside risk comparison
+
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/downrisk.png)
+
+
+## Value at Risk
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/VaR.png)
+
+
+
+
+## Rolling Value at Risk
+
+
+![](/Users/R/Hen_FM_practical/Question 4/plots/rolvar.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
