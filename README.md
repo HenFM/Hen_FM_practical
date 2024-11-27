@@ -9,8 +9,8 @@ gc() # garbage collection
 ```
 
     ##          used (Mb) gc trigger (Mb) limit (Mb) max used (Mb)
-    ## Ncells 492554 26.4    1057162 56.5         NA   700268 37.4
-    ## Vcells 929756  7.1    8388608 64.0      16384  1963431 15.0
+    ## Ncells 493119 26.4    1058777 56.6         NA   700268 37.4
+    ## Vcells 934797  7.2    8388608 64.0      16384  1963431 15.0
 
 ``` r
 library(here)
@@ -360,12 +360,619 @@ Indexes <- read_rds(here("data", "Cncy_Hedge_Assets.rds"))
 ZAR <- read_rds(here("data", "Monthly_zar.rds"))
 ```
 
+## Replicating the plot
+
+Let’s see if we can recreate the plot in the blogpost.
+
+From the blog: “This translates to a 42% allocation to FTSE/JSE All
+Share equities Index, 28% to the FTSE/JSE All Bond Index, 12% to the
+Bloomberg Global Aggregate Bond Index, 18% to the MSCI ACWI Equities
+Index”.
+
+These are in the `Indexes.rds` file: J433: 42% ALBI: 28% Bbg_Agg: 12%
+MSCI_ACWI: 18%
+
+This is the weighting we will use for the portfolio.
+
+Since we will be working across assets I will calculate simple returns.
+
+Let’s first convert Bbg_Agg and MSCI_ACWI into rands so that all returns
+have the same currency denomination.
+
+``` r
+# Merge ZAR exchange rate with Indexes
+data <- Indexes %>%
+  mutate(YM = format(date, "%Y_%b")) %>% 
+  left_join(ZAR %>% 
+              mutate(ZAR_Return = value/lag(value)-1)%>% 
+              mutate(YM = format(date, "%Y_%b")) %>% 
+              select(-c(date,Tickers)), by = "YM") 
+
+
+
+## Convert USD returns to ZAR returns
+#data_ZAR <- data %>%
+#  mutate(
+#    MSCI_ACWI_ZAR = MSCI_ACWI * value,  # Convert MSCI_ACWI to ZAR
+#    Bbg_Agg_ZAR = Bbg_Agg * value)  # Convert BbgAfg to ZAR
+
+# Convert ZAR to USD
+data_USD <- data %>% 
+  arrange(date) %>% 
+  group_by(date) %>% 
+  mutate(ALBI_USD = ALBI/value,
+         J433_USD = J433/value) %>% 
+  ungroup()
+
+## Calculate portfolio returns
+#Portf <- data_ZAR %>%
+#  mutate(
+#    # Hedged portfolio (fully in ZAR)
+#    portfolio_hedged = 0.42 * J433 + 0.28 * ALBI + 0.12 * Bbg_Agg_ZAR + 0.18 * MSCI_ACWI_ZAR,
+#    
+#    # Unhedged portfolio (global components remain in USD)
+#    portfolio_unhedged = 0.42 * J433 + 0.28 * ALBI +
+#      0.12 * Bbg_Agg + 0.18 * MSCI_ACWI
+#  )
+
+Portf <- data_USD %>% 
+  group_by(date) %>% 
+  mutate(
+    # Hedged portfolio (fully in USD)
+    portfolio_hedged = 0.42 * J433_USD + 0.28 * ALBI_USD + 0.12 * Bbg_Agg + 0.18 * MSCI_ACWI,
+    
+    # Unhedged portfolio (global components remain in USD)
+    portfolio_unhedged = 0.42 * J433 + 0.28 * ALBI +0.12 * Bbg_Agg + 0.18 * MSCI_ACWI
+  ) %>% 
+  ungroup()
+```
+
+``` r
+# Load necessary libraries
+library(ggplot2)
+library(ggExtra)
+
+# Calculate quadrant percentages
+Portf <- Portf %>%
+  mutate(
+    quadrant = case_when(
+      ZAR_Return < 0 & portfolio_unhedged >= 0 ~ "Top Left",
+      ZAR_Return >= 0 & portfolio_unhedged >= 0 ~ "Top Right",
+      ZAR_Return < 0 & portfolio_unhedged < 0 ~ "Bottom Left",
+      ZAR_Return >= 0 & portfolio_unhedged < 0 ~ "Bottom Right"
+    ),
+    restricted_quadrant = case_when(
+      ZAR_Return*100 < -2.5 & portfolio_unhedged >= 0 ~ "Restricted Top Left",
+      ZAR_Return*100 < -2.5 & portfolio_unhedged < 0 ~ "Restricted Bottom Left",
+      ZAR_Return*100 >= -2.5 & portfolio_unhedged >= 0 ~ "Restricted Top Right",
+      ZAR_Return*100 >= -2.5 & portfolio_unhedged < 0 ~ "Restricted Bottom Right",
+      TRUE ~ NA_character_
+    )
+  )
+
+# Calculate percentages for original quadrants
+quadrant_counts <- Portf %>%
+  group_by(quadrant) %>%
+  summarise(n = n()) %>%
+  mutate(percentage = round(n / sum(n) * 100, 1))
+
+# Calculate percentages for restricted quadrants
+restricted_counts <- Portf %>%
+  filter(!is.na(restricted_quadrant)) %>%  # Only include restricted quadrants
+  group_by(restricted_quadrant) %>%
+  summarise(n = n()) %>%
+  mutate(percentage = round(n / sum(n) * 100, 1))
+
+# Prepare percentages for labels
+percentage_TopLeft <- paste0(quadrant_counts$percentage[quadrant_counts$quadrant == "Top Left"], "%")
+percentage_TopRight <- paste0(quadrant_counts$percentage[quadrant_counts$quadrant == "Top Right"], "%")
+percentage_BottomLeft <- paste0(quadrant_counts$percentage[quadrant_counts$quadrant == "Bottom Left"], "%")
+percentage_BottomRight <- paste0(quadrant_counts$percentage[quadrant_counts$quadrant == "Bottom Right"], "%")
+
+# Restricted quadrant percentages
+percentage_RestrictedTopLeft <- paste0(
+  restricted_counts$percentage[restricted_counts$restricted_quadrant == "Restricted Top Left"], "%"
+)
+percentage_RestrictedBottomLeft <- paste0(
+  restricted_counts$percentage[restricted_counts$restricted_quadrant == "Restricted Bottom Left"], "%"
+)
+
+# Generate scatter plot with updated quadrant label positions
+scatter_plot <- ggplot(Portf, aes(x = ZAR_Return * 100, y = portfolio_unhedged * 100)) +
+  # Add pastel background quadrants with gridlines visible
+  geom_rect(aes(xmin = -20, xmax = 0, ymin = 0, ymax = 20), fill = "#FFDAB9", alpha = 0.9) +  # Light peach
+  geom_rect(aes(xmin = 0, xmax = 20, ymin = 0, ymax = 20), fill = "#E6E6FA", alpha = 0.9) +  # Lavender
+  geom_rect(aes(xmin = -20, xmax = 0, ymin = -20, ymax = 0), fill = "#B0E0E6", alpha = 0.5) + # Powder blue
+  geom_rect(aes(xmin = 0, xmax = 20, ymin = -20, ymax = 0), fill = "#98FB98", alpha = 0.5) +  # Pale green
+
+  # Add scatter points
+  geom_point(alpha = 0.6) +
+
+  # Add density contours with thinner and more opaque lines
+  geom_density2d(color = "blue", size = 0.3, alpha = 0.8) +
+
+  # Add regression line
+  geom_smooth(method = "lm", color = "red", linetype = "solid", alpha = 0.9) +
+
+  # Add solid zero lines
+  geom_hline(yintercept = 0, linetype = "solid", color = "grey") +
+  geom_vline(xintercept = 0, linetype = "solid", color = "grey") +
+
+  # Add dashed line for hedging fee at -2.5%
+  geom_vline(xintercept = -2.5, linetype = "dashed", color = "grey") +
+
+  # Add quadrant percentage labels
+  geom_label(aes(x = -20, y = 20, label = percentage_TopLeft), hjust = 0, vjust = 1, 
+             size = 4, color = "black", fill = "white") +  # Top-left quadrant
+  geom_label(aes(x = 20, y = 20, label = percentage_TopRight), hjust = 1, vjust = 1, 
+             size = 4, color = "black", fill = "white") +  # Top-right quadrant (moved to top-right corner)
+  geom_label(aes(x = -20, y = -20, label = percentage_BottomLeft), hjust = 0, vjust = 0, 
+             size = 4, color = "black", fill = "white") + # Bottom-left quadrant
+  geom_label(aes(x = 20, y = -20, label = percentage_BottomRight), hjust = 1, vjust = 0, 
+             size = 4, color = "black", fill = "white") + # Bottom-right quadrant (moved to bottom-right corner)
+
+  # Add restricted quadrant percentage labels
+  geom_label(aes(x = -2.5, y = 20, label = percentage_RestrictedTopLeft), hjust = 1, vjust = 1, 
+             size = 4, color = "black", fill = "white") +  # Restricted top-left quadrant
+  geom_label(aes(x = -2.5, y = -20, label = percentage_RestrictedBottomLeft), hjust = 1, vjust = 0, 
+             size = 4, color = "black", fill = "white") + # Restricted bottom-left quadrant
+
+  # Add quadrant annotations with geom_label()
+  geom_label(aes(x = -10, y = 13, label = "Hedge works but \n amplifies volatility"),
+             hjust = 0.5, vjust = 0.5, size = 4, color = "black", fill = "white", alpha = 0.8) +
+  geom_label(aes(x = 10, y = 13, label = "Hedge throws away \n returns"),
+             hjust = 0.5, vjust = 0.5, size = 4, color = "black", fill = "white", alpha = 0.8) +
+  geom_label(aes(x = -10, y = -13, label = "Best case for hedge: \n higher return, lower volatility"),
+             hjust = 0.5, vjust = 0.5, size = 4, color = "black", fill = "white", alpha = 0.8) +
+  geom_label(aes(x = 10, y = -13, label = "Hedge removes \n currency cushion"),
+             hjust = 0.5, vjust = 0.5, size = 4, color = "black", fill = "white", alpha = 0.8) +
+
+  # Set axis limits and labels
+  scale_x_continuous(limits = c(-20, 20), breaks = seq(-20, 20, 10), labels = function(x) paste0(x, "%")) +
+  scale_y_continuous(limits = c(-20, 20), breaks = seq(-20, 20, 10), labels = function(y) paste0(y, "%")) +
+
+  # Add labels and theme
+  labs(
+    title = "Scatter Plot of USD/ZAR returns vs Portfolio returns",
+    x = "USD-ZAR Exchange Rate Returns (%)",
+    y = "60/40 Global Portfolio Returns (USD) (%)"
+  ) +
+  theme_minimal()
+
+# Add marginal density plots with increased opacity
+ggExtra::ggMarginal(scatter_plot, type = "density", fill = "grey", alpha = 0.7)
+```
+
+![](README_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+
+``` r
+#ggsave(here("Question 2/plots/scatter.png"), plot = scatter_plot, width = 10, height = 7, dpi = 300)
+```
+
+Success
+
+## Rolling volatity
+
+Using Rccp package I calculate the 2 year rolling standard deviation
+between the hedged and unhedged portfolios.
+
+``` r
+combo_df <- Portf %>% 
+  select(date, portfolio_hedged, portfolio_unhedged) %>% 
+  pivot_longer(-date, names_to = "Type", values_to = "Returns") %>% 
+  group_by(Type) %>% 
+  mutate(RollSD = RcppRoll::roll_sd(1 + Returns, 24, fill = NA, align = "right") *
+    sqrt(12)) %>%
+    filter(!is.na(RollSD))
+
+i <- combo_df %>%
+    ggplot() + geom_line(aes(date, RollSD, color = Type),
+    alpha = 0.7, size = 1.25) + labs(title = "Rolling 2 Year Annualized Standard Devation Comparison",
+    subtitle = "", x = "", y = "Rolling 2 year Returns (Ann.)",
+    caption = "Note:") + theme_fmx(title.size = ggpts(30),
+    subtitle.size = ggpts(5), caption.size = ggpts(25), CustomCaption = T) +
+    fmx_cols()
+
+roll_sd_port <- finplot(i, x.date.dist = "1 year", x.date.type = "%Y", x.vert = T,
+    y.pct = T, y.pct_acc = 1)
+
+#ggsave(here("Question 2/plots/roll_sd_port.png"), plot = roll_sd_port, width = 6, height = 4, dpi = 300)
+
+roll_sd_port
+```
+
+![](README_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
+
 # QUESTION 3
 
 ``` r
 ALSI <- read_rds(here("data", "ALSI.rds"))
 RebDays <- read_rds(here("data", "Rebalance_days.rds"))
 ```
+
+## Investigation allocation
+
+Let’s see how sector weights differ between indices
+
+``` r
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(patchwork) # For combining plots
+
+# Step 1: Aggregate Data by Sector and Date
+sector_allocation <- ALSI %>%
+  group_by(date, Sector) %>%
+  summarise(
+    J203_sum = sum(J203, na.rm = TRUE),
+    J403_sum = sum(J403, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(date) %>%
+  mutate(
+    J203_share = J203_sum / sum(J203_sum, na.rm = TRUE),
+    J403_share = J403_sum / sum(J403_sum, na.rm = TRUE)
+  )
+
+# Step 2: Plot Sector Allocation for J203
+plot_j203 <- ggplot(sector_allocation, aes(x = date, y = J203_share, fill = Sector)) +
+  geom_area(position = "stack") +
+  labs(
+    title = "J203",
+    y = "Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none", # legend is shared by both figs
+    axis.title.x = element_blank() # Remove x-axis label
+  )
+
+# Step 3: Plot Sector Allocation for J403
+plot_j403 <- ggplot(sector_allocation, aes(x = date, y = J403_share, fill = Sector)) +
+  geom_area(position = "stack") +
+  labs(
+    title = "J403",
+    y = "Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none", # Legend will be shared
+    axis.title.x = element_blank() # Remove x-axis label
+  )
+
+# Step 4: Combine the Two Plots with Shared Legend and Main Title
+combined_plot <- (plot_j203 / plot_j403) +
+  plot_layout(guides = "collect") & 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# Add a main title
+combined_plot <- combined_plot + plot_annotation(
+  title = "Sector Allocation Over Time"
+)
+
+combined_plot
+```
+
+![](README_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+
+``` r
+#ggsave(here("Question 3/plots/sectweights.png"), plot = combined_plot, width = 8, height = 5, dpi = 300)
+```
+
+``` r
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(patchwork) # For combining plots
+
+# Step 1: Update Index_Name for Ticker == "RBW"
+ALSI <- ALSI %>%
+  mutate(Index_Name = ifelse(Tickers == "RBW", "Mid_Caps", Index_Name))
+
+# Step 2: Aggregate Data by Index_Name and Date
+index_allocation <- ALSI %>%
+  group_by(date, Index_Name) %>%
+  summarise(
+    J203_sum = sum(J203, na.rm = TRUE),
+    J403_sum = sum(J403, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(date) %>%
+  mutate(
+    J203_share = J203_sum / sum(J203_sum, na.rm = TRUE),
+    J403_share = J403_sum / sum(J403_sum, na.rm = TRUE)
+  )
+
+# Step 3: Plot Allocation for J203
+plot_j203 <- ggplot(index_allocation, aes(x = date, y = J203_share, fill = Index_Name)) +
+  geom_area(position = "stack") +
+  labs(
+    title = "J203",
+    y = "Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none", # Legend will be shared
+    axis.title.x = element_blank() # Remove x-axis label
+  )
+
+# Step 4: Plot Allocation for J403
+plot_j403 <- ggplot(index_allocation, aes(x = date, y = J403_share, fill = Index_Name)) +
+  geom_area(position = "stack") +
+  labs(
+    title = "J403",
+    y = "Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none", # Legend will be shared
+    axis.title.x = element_blank() # Remove x-axis label
+  )
+
+# Step 5: Combine the Two Plots with Shared Legend and Main Title
+combined_plot <- (plot_j203 / plot_j403) +
+  plot_layout(guides = "collect") & 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# Add a main title
+index_plot <- combined_plot + plot_annotation(
+  title = "Index Allocation Over Time"
+)
+
+# Display the Combined Plot
+index_plot
+```
+
+![](README_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
+
+``` r
+# ggsave(here("Question 3/plots/index_plot.png"), plot = index_plot, width = 8, height = 5, dpi = 300)
+```
+
+## Performance
+
+``` r
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+# Step 1: Calculate Weighted Returns for Each Index
+cumulative_returns <- ALSI %>%
+  group_by(date) %>%
+  summarise(
+    J203_weighted_return = sum(Return * J203, na.rm = TRUE), # Weighted return for J203
+    J403_weighted_return = sum(Return * J403, na.rm = TRUE), # Weighted return for J403
+    .groups = "drop"
+  ) %>%
+  mutate(
+    J203_cum_return = cumprod(1 + J203_weighted_return), # Cumulative return for J203
+    J403_cum_return = cumprod(1 + J403_weighted_return)  # Cumulative return for J403
+  )
+
+# Step 2: Reshape Data for Plotting
+cumulative_returns_long <- cumulative_returns %>%
+  select(date, J203_cum_return, J403_cum_return) %>%
+  pivot_longer(
+    cols = starts_with("J"),
+    names_to = "Index",
+    values_to = "Cumulative_Return"
+  )
+
+# Step 3: Plot Cumulative Returns
+cumulative_plot <- ggplot(cumulative_returns_long, aes(x = date, y = Cumulative_Return, color = Index)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Cumulative Returns for J203 and J403",
+    x = "",
+    y = "Cumulative Return",
+    color = "Index"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+cumret <- fmxdat::finplot(cumulative_plot, x.date.dist = "1 year", x.date.type = "%Y", x.vert = T,
+    y.pct = T, y.pct_acc = 1)
+
+# Display the Plot
+print(cumret)
+```
+
+![](README_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->
+
+``` r
+#ggsave(here("Question 3/plots/cumret.png"), plot = cumret, width = 8, height = 5, dpi = 300)
+```
+
+Let’s compare the volatility
+
+``` r
+library(RcppRoll)
+
+# Step 1: Calculate weighted returns for each index
+rolling_sd_df <- ALSI %>%
+  group_by(date) %>%
+  summarise(
+    J203_weighted_return = sum(Return * J203, na.rm = TRUE), # Weighted return for J203
+    J403_weighted_return = sum(Return * J403, na.rm = TRUE), # Weighted return for J403
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = starts_with("J"),
+    names_to = "Index",
+    values_to = "Returns"
+  ) %>%
+  group_by(Index) %>%
+  mutate(
+    RollSD = RcppRoll::roll_sd(1 + Returns, 24, fill = NA, align = "right") * sqrt(12) # Annualized rolling SD
+  ) %>%
+  filter(!is.na(RollSD))
+
+# Step 2: Plot the rolling 2-year standard deviation
+i <- rolling_sd_df %>%
+  ggplot() +
+  geom_line(aes(date, RollSD, color = Index), alpha = 0.7, size = 1.25) +
+  labs(
+    title = "Rolling 2-Year Annualized Standard Deviation Comparison",
+    x = "",
+    y = "Rolling 2-Year Returns (Ann.)",
+    caption = "Note: Monthly data, annualized SD calculated over a 24-month rolling window"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "bottom"
+  )
+
+# Display the plot
+print(i)
+```
+
+![](README_files/figure-gfm/unnamed-chunk-21-1.png)<!-- -->
+
+``` r
+# Load required libraries
+
+library(PerformanceAnalytics)
+
+# Step 1: Filter data for the last 2 years
+last_two_years <- ALSI %>%
+  filter(date >= max(date) - lubridate::years(2)) %>%
+  group_by(date) %>%
+  summarise(
+    J203_weighted_return = sum(Return * J203, na.rm = TRUE),
+    J403_weighted_return = sum(Return * J403, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Step 2: Compute Expected Shortfall
+# Convert data to xts for PerformanceAnalytics compatibility
+returns_xts <- xts::xts(
+  last_two_years %>% select(J203_weighted_return, J403_weighted_return),
+  order.by = last_two_years$date
+)
+
+# Calculate Expected Shortfall (at 95% confidence level)
+es_values <- PerformanceAnalytics::ES(
+  R = returns_xts,
+  p = 0.05,
+  method = "historical"
+)
+
+# Step 3: Print the Expected Shortfall results
+es_results <- tibble::tibble(
+  Index = c("J203", "J403"),
+  Expected_Shortfall = as.numeric(es_values)
+)
+
+# Display the results
+print(es_results)
+```
+
+    ## # A tibble: 2 × 2
+    ##   Index Expected_Shortfall
+    ##   <chr>              <dbl>
+    ## 1 J203             -0.0246
+    ## 2 J403             -0.0239
+
+## Stratifcation on Rand Volatility
+
+I couldn’t finish this one in time.
+
+``` r
+# Step 1: Compute monthly ZAR volatility
+zar_volatility <- ZAR %>%
+  mutate(return = value/lag(value)-1) %>% 
+  mutate(Year = format(date, "%Y")) %>%
+  group_by(Year) %>%
+  summarise(SD = sd(return, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(
+    TopQtile = quantile(SD, 0.8, na.rm = TRUE),  # Top quintile for high volatility
+    BotQtile = quantile(SD, 0.2, na.rm = TRUE)   # Bottom quintile for low volatility
+  )
+
+# Identify high and low volatility periods
+Hi_Vol <- zar_volatility %>% filter(SD > TopQtile) %>% pull(Year)
+Low_Vol <- zar_volatility %>% filter(SD < BotQtile) %>% pull(Year)
+
+# Step 2: Prepare the index returns (weighted returns for J203 and J403)
+Idxs <- ALSI %>%
+  group_by(date) %>%
+  summarise(
+    J203_weighted_return = sum(Return * J203, na.rm = TRUE),
+    J403_weighted_return = sum(Return * J403, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Year = format(date, "%Y")
+  )
+
+# Winsorize returns at 1% and 99% levels
+Idxs <- Idxs %>%
+  mutate(
+    Top_J203 = quantile(J203_weighted_return, 0.99, na.rm = TRUE),
+    Bot_J203 = quantile(J203_weighted_return, 0.01, na.rm = TRUE),
+    Top_J403 = quantile(J403_weighted_return, 0.99, na.rm = TRUE),
+    Bot_J403 = quantile(J403_weighted_return, 0.01, na.rm = TRUE),
+    J203_winsorized = pmin(pmax(J203_weighted_return, Bot_J203), Top_J203),
+    J403_winsorized = pmin(pmax(J403_weighted_return, Bot_J403), Top_J403)
+  )
+
+# Step 3: Compare performance during high and low volatility periods
+Perf_comparisons <- function(Idxs, YMs, Alias) {
+  Idxs %>%
+    filter(Year %in% YMs) %>%
+    summarise(
+      Period = Alias,
+      J203_SD = sd(J203_winsorized, na.rm = TRUE) * sqrt(12),  # Annualized SD
+      J403_SD = sd(J403_winsorized, na.rm = TRUE) * sqrt(12),  # Annualized SD
+      J203_Mean = mean(J203_winsorized, na.rm = TRUE),         # Mean return
+      J403_Mean = mean(J403_winsorized, na.rm = TRUE)          # Mean return
+    )
+}
+
+perf_hi <- Perf_comparisons(Idxs, YMs = Hi_Vol, Alias = "High Volatility")
+perf_lo <- Perf_comparisons(Idxs, YMs = Low_Vol, Alias = "Low Volatility")
+
+# Combine results
+comparison_results <- bind_rows(perf_hi, perf_lo)
+
+# Step 4: Visualize the results
+comparison_plot <- comparison_results %>%
+  pivot_longer(cols = starts_with("J"), names_to = "Metric", values_to = "Value") %>%
+  ggplot(aes(x = Period, y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Performance of J203 and J403 During Different ZAR Volatility Periods",
+    x = "Volatility Period",
+    y = "Metric Value",
+    fill = "Metric"
+  ) +
+  theme_minimal()
+
+# Display the results and plot
+print(comparison_results)
+```
+
+    ## # A tibble: 2 × 5
+    ##   Period          J203_SD J403_SD  J203_Mean  J403_Mean
+    ##   <chr>             <dbl>   <dbl>      <dbl>      <dbl>
+    ## 1 High Volatility  0.0391  0.0401   0.000293   0.000205
+    ## 2 Low Volatility  NA      NA      NaN        NaN
+
+``` r
+print(comparison_plot)
+```
+
+![](README_files/figure-gfm/unnamed-chunk-23-1.png)<!-- -->
 
 # QUESTION 4
 
@@ -520,20 +1127,20 @@ gt::gtsave(tab, file = '/Users/R/Hen_FM_practical/Question 4/plots/Tab.png')
 tab
 ```
 
-<div id="qofgfrjbxm" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
-<style>#qofgfrjbxm table {
+<div id="hcqnhkujmq" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>#hcqnhkujmq table {
   font-family: system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-&#10;#qofgfrjbxm thead, #qofgfrjbxm tbody, #qofgfrjbxm tfoot, #qofgfrjbxm tr, #qofgfrjbxm td, #qofgfrjbxm th {
+&#10;#hcqnhkujmq thead, #hcqnhkujmq tbody, #hcqnhkujmq tfoot, #hcqnhkujmq tr, #hcqnhkujmq td, #hcqnhkujmq th {
   border-style: none;
 }
-&#10;#qofgfrjbxm p {
+&#10;#hcqnhkujmq p {
   margin: 0;
   padding: 0;
 }
-&#10;#qofgfrjbxm .gt_table {
+&#10;#hcqnhkujmq .gt_table {
   display: table;
   border-collapse: collapse;
   line-height: normal;
@@ -558,11 +1165,11 @@ tab
   border-left-width: 2px;
   border-left-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_caption {
+&#10;#hcqnhkujmq .gt_caption {
   padding-top: 4px;
   padding-bottom: 4px;
 }
-&#10;#qofgfrjbxm .gt_title {
+&#10;#hcqnhkujmq .gt_title {
   color: #333333;
   font-size: 125%;
   font-weight: initial;
@@ -573,7 +1180,7 @@ tab
   border-bottom-color: #FFFFFF;
   border-bottom-width: 0;
 }
-&#10;#qofgfrjbxm .gt_subtitle {
+&#10;#hcqnhkujmq .gt_subtitle {
   color: #333333;
   font-size: 85%;
   font-weight: initial;
@@ -584,7 +1191,7 @@ tab
   border-top-color: #FFFFFF;
   border-top-width: 0;
 }
-&#10;#qofgfrjbxm .gt_heading {
+&#10;#hcqnhkujmq .gt_heading {
   background-color: #FFFFFF;
   text-align: center;
   border-bottom-color: #FFFFFF;
@@ -595,12 +1202,12 @@ tab
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_bottom_border {
+&#10;#hcqnhkujmq .gt_bottom_border {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_col_headings {
+&#10;#hcqnhkujmq .gt_col_headings {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -614,7 +1221,7 @@ tab
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_col_heading {
+&#10;#hcqnhkujmq .gt_col_heading {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 14px;
@@ -633,7 +1240,7 @@ tab
   padding-right: 5px;
   overflow-x: hidden;
 }
-&#10;#qofgfrjbxm .gt_column_spanner_outer {
+&#10;#hcqnhkujmq .gt_column_spanner_outer {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 14px;
@@ -644,13 +1251,13 @@ tab
   padding-left: 4px;
   padding-right: 4px;
 }
-&#10;#qofgfrjbxm .gt_column_spanner_outer:first-child {
+&#10;#hcqnhkujmq .gt_column_spanner_outer:first-child {
   padding-left: 0;
 }
-&#10;#qofgfrjbxm .gt_column_spanner_outer:last-child {
+&#10;#hcqnhkujmq .gt_column_spanner_outer:last-child {
   padding-right: 0;
 }
-&#10;#qofgfrjbxm .gt_column_spanner {
+&#10;#hcqnhkujmq .gt_column_spanner {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
@@ -661,10 +1268,10 @@ tab
   display: inline-block;
   width: 100%;
 }
-&#10;#qofgfrjbxm .gt_spanner_row {
+&#10;#hcqnhkujmq .gt_spanner_row {
   border-bottom-style: hidden;
 }
-&#10;#qofgfrjbxm .gt_group_heading {
+&#10;#hcqnhkujmq .gt_group_heading {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -689,7 +1296,7 @@ tab
   vertical-align: middle;
   text-align: left;
 }
-&#10;#qofgfrjbxm .gt_empty_group_heading {
+&#10;#hcqnhkujmq .gt_empty_group_heading {
   padding: 0.5px;
   color: #333333;
   background-color: #FFFFFF;
@@ -703,13 +1310,13 @@ tab
   border-bottom-color: #D3D3D3;
   vertical-align: middle;
 }
-&#10;#qofgfrjbxm .gt_from_md > :first-child {
+&#10;#hcqnhkujmq .gt_from_md > :first-child {
   margin-top: 0;
 }
-&#10;#qofgfrjbxm .gt_from_md > :last-child {
+&#10;#hcqnhkujmq .gt_from_md > :last-child {
   margin-bottom: 0;
 }
-&#10;#qofgfrjbxm .gt_row {
+&#10;#hcqnhkujmq .gt_row {
   padding-top: 6px;
   padding-bottom: 6px;
   padding-left: 5px;
@@ -727,7 +1334,7 @@ tab
   vertical-align: middle;
   overflow-x: hidden;
 }
-&#10;#qofgfrjbxm .gt_stub {
+&#10;#hcqnhkujmq .gt_stub {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -739,7 +1346,7 @@ tab
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#qofgfrjbxm .gt_stub_row_group {
+&#10;#hcqnhkujmq .gt_stub_row_group {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -752,13 +1359,13 @@ tab
   padding-right: 5px;
   vertical-align: top;
 }
-&#10;#qofgfrjbxm .gt_row_group_first td {
+&#10;#hcqnhkujmq .gt_row_group_first td {
   border-top-width: 2px;
 }
-&#10;#qofgfrjbxm .gt_row_group_first th {
+&#10;#hcqnhkujmq .gt_row_group_first th {
   border-top-width: 2px;
 }
-&#10;#qofgfrjbxm .gt_summary_row {
+&#10;#hcqnhkujmq .gt_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -767,14 +1374,14 @@ tab
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#qofgfrjbxm .gt_first_summary_row {
+&#10;#hcqnhkujmq .gt_first_summary_row {
   border-top-style: solid;
   border-top-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_first_summary_row.thick {
+&#10;#hcqnhkujmq .gt_first_summary_row.thick {
   border-top-width: 2px;
 }
-&#10;#qofgfrjbxm .gt_last_summary_row {
+&#10;#hcqnhkujmq .gt_last_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -783,7 +1390,7 @@ tab
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_grand_summary_row {
+&#10;#hcqnhkujmq .gt_grand_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -792,7 +1399,7 @@ tab
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#qofgfrjbxm .gt_first_grand_summary_row {
+&#10;#hcqnhkujmq .gt_first_grand_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -801,7 +1408,7 @@ tab
   border-top-width: 6px;
   border-top-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_last_grand_summary_row_top {
+&#10;#hcqnhkujmq .gt_last_grand_summary_row_top {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -810,10 +1417,10 @@ tab
   border-bottom-width: 6px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_striped {
+&#10;#hcqnhkujmq .gt_striped {
   background-color: rgba(128, 128, 128, 0.05);
 }
-&#10;#qofgfrjbxm .gt_table_body {
+&#10;#hcqnhkujmq .gt_table_body {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -821,7 +1428,7 @@ tab
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_footnotes {
+&#10;#hcqnhkujmq .gt_footnotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -834,7 +1441,7 @@ tab
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_footnote {
+&#10;#hcqnhkujmq .gt_footnote {
   margin: 0px;
   font-size: 90%;
   padding-top: 4px;
@@ -842,7 +1449,7 @@ tab
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#qofgfrjbxm .gt_sourcenotes {
+&#10;#hcqnhkujmq .gt_sourcenotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -855,64 +1462,64 @@ tab
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#qofgfrjbxm .gt_sourcenote {
+&#10;#hcqnhkujmq .gt_sourcenote {
   font-size: 90%;
   padding-top: 4px;
   padding-bottom: 4px;
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#qofgfrjbxm .gt_left {
+&#10;#hcqnhkujmq .gt_left {
   text-align: left;
 }
-&#10;#qofgfrjbxm .gt_center {
+&#10;#hcqnhkujmq .gt_center {
   text-align: center;
 }
-&#10;#qofgfrjbxm .gt_right {
+&#10;#hcqnhkujmq .gt_right {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-&#10;#qofgfrjbxm .gt_font_normal {
+&#10;#hcqnhkujmq .gt_font_normal {
   font-weight: normal;
 }
-&#10;#qofgfrjbxm .gt_font_bold {
+&#10;#hcqnhkujmq .gt_font_bold {
   font-weight: bold;
 }
-&#10;#qofgfrjbxm .gt_font_italic {
+&#10;#hcqnhkujmq .gt_font_italic {
   font-style: italic;
 }
-&#10;#qofgfrjbxm .gt_super {
+&#10;#hcqnhkujmq .gt_super {
   font-size: 65%;
 }
-&#10;#qofgfrjbxm .gt_footnote_marks {
+&#10;#hcqnhkujmq .gt_footnote_marks {
   font-size: 75%;
   vertical-align: 0.4em;
   position: initial;
 }
-&#10;#qofgfrjbxm .gt_asterisk {
+&#10;#hcqnhkujmq .gt_asterisk {
   font-size: 100%;
   vertical-align: 0;
 }
-&#10;#qofgfrjbxm .gt_indent_1 {
+&#10;#hcqnhkujmq .gt_indent_1 {
   text-indent: 5px;
 }
-&#10;#qofgfrjbxm .gt_indent_2 {
+&#10;#hcqnhkujmq .gt_indent_2 {
   text-indent: 10px;
 }
-&#10;#qofgfrjbxm .gt_indent_3 {
+&#10;#hcqnhkujmq .gt_indent_3 {
   text-indent: 15px;
 }
-&#10;#qofgfrjbxm .gt_indent_4 {
+&#10;#hcqnhkujmq .gt_indent_4 {
   text-indent: 20px;
 }
-&#10;#qofgfrjbxm .gt_indent_5 {
+&#10;#hcqnhkujmq .gt_indent_5 {
   text-indent: 25px;
 }
-&#10;#qofgfrjbxm .katex-display {
+&#10;#hcqnhkujmq .katex-display {
   display: inline-flex !important;
   margin-bottom: 0.75em !important;
 }
-&#10;#qofgfrjbxm div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
+&#10;#hcqnhkujmq div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
   height: 0px !important;
 }
 </style>
@@ -1204,20 +1811,20 @@ top_combined_gt <- top_combined %>%
 top_combined_gt
 ```
 
-<div id="wakatcwsug" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
-<style>#wakatcwsug table {
+<div id="pgsjxxsjbs" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>#pgsjxxsjbs table {
   font-family: system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-&#10;#wakatcwsug thead, #wakatcwsug tbody, #wakatcwsug tfoot, #wakatcwsug tr, #wakatcwsug td, #wakatcwsug th {
+&#10;#pgsjxxsjbs thead, #pgsjxxsjbs tbody, #pgsjxxsjbs tfoot, #pgsjxxsjbs tr, #pgsjxxsjbs td, #pgsjxxsjbs th {
   border-style: none;
 }
-&#10;#wakatcwsug p {
+&#10;#pgsjxxsjbs p {
   margin: 0;
   padding: 0;
 }
-&#10;#wakatcwsug .gt_table {
+&#10;#pgsjxxsjbs .gt_table {
   display: table;
   border-collapse: collapse;
   line-height: normal;
@@ -1242,11 +1849,11 @@ top_combined_gt
   border-left-width: 2px;
   border-left-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_caption {
+&#10;#pgsjxxsjbs .gt_caption {
   padding-top: 4px;
   padding-bottom: 4px;
 }
-&#10;#wakatcwsug .gt_title {
+&#10;#pgsjxxsjbs .gt_title {
   color: #333333;
   font-size: 125%;
   font-weight: initial;
@@ -1257,7 +1864,7 @@ top_combined_gt
   border-bottom-color: #FFFFFF;
   border-bottom-width: 0;
 }
-&#10;#wakatcwsug .gt_subtitle {
+&#10;#pgsjxxsjbs .gt_subtitle {
   color: #333333;
   font-size: 85%;
   font-weight: initial;
@@ -1268,7 +1875,7 @@ top_combined_gt
   border-top-color: #FFFFFF;
   border-top-width: 0;
 }
-&#10;#wakatcwsug .gt_heading {
+&#10;#pgsjxxsjbs .gt_heading {
   background-color: #FFFFFF;
   text-align: center;
   border-bottom-color: #FFFFFF;
@@ -1279,12 +1886,12 @@ top_combined_gt
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_bottom_border {
+&#10;#pgsjxxsjbs .gt_bottom_border {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_col_headings {
+&#10;#pgsjxxsjbs .gt_col_headings {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -1298,7 +1905,7 @@ top_combined_gt
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_col_heading {
+&#10;#pgsjxxsjbs .gt_col_heading {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -1317,7 +1924,7 @@ top_combined_gt
   padding-right: 5px;
   overflow-x: hidden;
 }
-&#10;#wakatcwsug .gt_column_spanner_outer {
+&#10;#pgsjxxsjbs .gt_column_spanner_outer {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -1328,13 +1935,13 @@ top_combined_gt
   padding-left: 4px;
   padding-right: 4px;
 }
-&#10;#wakatcwsug .gt_column_spanner_outer:first-child {
+&#10;#pgsjxxsjbs .gt_column_spanner_outer:first-child {
   padding-left: 0;
 }
-&#10;#wakatcwsug .gt_column_spanner_outer:last-child {
+&#10;#pgsjxxsjbs .gt_column_spanner_outer:last-child {
   padding-right: 0;
 }
-&#10;#wakatcwsug .gt_column_spanner {
+&#10;#pgsjxxsjbs .gt_column_spanner {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
@@ -1345,10 +1952,10 @@ top_combined_gt
   display: inline-block;
   width: 100%;
 }
-&#10;#wakatcwsug .gt_spanner_row {
+&#10;#pgsjxxsjbs .gt_spanner_row {
   border-bottom-style: hidden;
 }
-&#10;#wakatcwsug .gt_group_heading {
+&#10;#pgsjxxsjbs .gt_group_heading {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -1373,7 +1980,7 @@ top_combined_gt
   vertical-align: middle;
   text-align: left;
 }
-&#10;#wakatcwsug .gt_empty_group_heading {
+&#10;#pgsjxxsjbs .gt_empty_group_heading {
   padding: 0.5px;
   color: #333333;
   background-color: #FFFFFF;
@@ -1387,13 +1994,13 @@ top_combined_gt
   border-bottom-color: #D3D3D3;
   vertical-align: middle;
 }
-&#10;#wakatcwsug .gt_from_md > :first-child {
+&#10;#pgsjxxsjbs .gt_from_md > :first-child {
   margin-top: 0;
 }
-&#10;#wakatcwsug .gt_from_md > :last-child {
+&#10;#pgsjxxsjbs .gt_from_md > :last-child {
   margin-bottom: 0;
 }
-&#10;#wakatcwsug .gt_row {
+&#10;#pgsjxxsjbs .gt_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -1411,7 +2018,7 @@ top_combined_gt
   vertical-align: middle;
   overflow-x: hidden;
 }
-&#10;#wakatcwsug .gt_stub {
+&#10;#pgsjxxsjbs .gt_stub {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -1423,7 +2030,7 @@ top_combined_gt
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#wakatcwsug .gt_stub_row_group {
+&#10;#pgsjxxsjbs .gt_stub_row_group {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -1436,13 +2043,13 @@ top_combined_gt
   padding-right: 5px;
   vertical-align: top;
 }
-&#10;#wakatcwsug .gt_row_group_first td {
+&#10;#pgsjxxsjbs .gt_row_group_first td {
   border-top-width: 2px;
 }
-&#10;#wakatcwsug .gt_row_group_first th {
+&#10;#pgsjxxsjbs .gt_row_group_first th {
   border-top-width: 2px;
 }
-&#10;#wakatcwsug .gt_summary_row {
+&#10;#pgsjxxsjbs .gt_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -1451,14 +2058,14 @@ top_combined_gt
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#wakatcwsug .gt_first_summary_row {
+&#10;#pgsjxxsjbs .gt_first_summary_row {
   border-top-style: solid;
   border-top-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_first_summary_row.thick {
+&#10;#pgsjxxsjbs .gt_first_summary_row.thick {
   border-top-width: 2px;
 }
-&#10;#wakatcwsug .gt_last_summary_row {
+&#10;#pgsjxxsjbs .gt_last_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -1467,7 +2074,7 @@ top_combined_gt
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_grand_summary_row {
+&#10;#pgsjxxsjbs .gt_grand_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -1476,7 +2083,7 @@ top_combined_gt
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#wakatcwsug .gt_first_grand_summary_row {
+&#10;#pgsjxxsjbs .gt_first_grand_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -1485,7 +2092,7 @@ top_combined_gt
   border-top-width: 6px;
   border-top-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_last_grand_summary_row_top {
+&#10;#pgsjxxsjbs .gt_last_grand_summary_row_top {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -1494,10 +2101,10 @@ top_combined_gt
   border-bottom-width: 6px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_striped {
+&#10;#pgsjxxsjbs .gt_striped {
   background-color: rgba(128, 128, 128, 0.05);
 }
-&#10;#wakatcwsug .gt_table_body {
+&#10;#pgsjxxsjbs .gt_table_body {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -1505,7 +2112,7 @@ top_combined_gt
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_footnotes {
+&#10;#pgsjxxsjbs .gt_footnotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -1518,7 +2125,7 @@ top_combined_gt
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_footnote {
+&#10;#pgsjxxsjbs .gt_footnote {
   margin: 0px;
   font-size: 90%;
   padding-top: 4px;
@@ -1526,7 +2133,7 @@ top_combined_gt
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#wakatcwsug .gt_sourcenotes {
+&#10;#pgsjxxsjbs .gt_sourcenotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -1539,64 +2146,64 @@ top_combined_gt
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#wakatcwsug .gt_sourcenote {
+&#10;#pgsjxxsjbs .gt_sourcenote {
   font-size: 90%;
   padding-top: 4px;
   padding-bottom: 4px;
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#wakatcwsug .gt_left {
+&#10;#pgsjxxsjbs .gt_left {
   text-align: left;
 }
-&#10;#wakatcwsug .gt_center {
+&#10;#pgsjxxsjbs .gt_center {
   text-align: center;
 }
-&#10;#wakatcwsug .gt_right {
+&#10;#pgsjxxsjbs .gt_right {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-&#10;#wakatcwsug .gt_font_normal {
+&#10;#pgsjxxsjbs .gt_font_normal {
   font-weight: normal;
 }
-&#10;#wakatcwsug .gt_font_bold {
+&#10;#pgsjxxsjbs .gt_font_bold {
   font-weight: bold;
 }
-&#10;#wakatcwsug .gt_font_italic {
+&#10;#pgsjxxsjbs .gt_font_italic {
   font-style: italic;
 }
-&#10;#wakatcwsug .gt_super {
+&#10;#pgsjxxsjbs .gt_super {
   font-size: 65%;
 }
-&#10;#wakatcwsug .gt_footnote_marks {
+&#10;#pgsjxxsjbs .gt_footnote_marks {
   font-size: 75%;
   vertical-align: 0.4em;
   position: initial;
 }
-&#10;#wakatcwsug .gt_asterisk {
+&#10;#pgsjxxsjbs .gt_asterisk {
   font-size: 100%;
   vertical-align: 0;
 }
-&#10;#wakatcwsug .gt_indent_1 {
+&#10;#pgsjxxsjbs .gt_indent_1 {
   text-indent: 5px;
 }
-&#10;#wakatcwsug .gt_indent_2 {
+&#10;#pgsjxxsjbs .gt_indent_2 {
   text-indent: 10px;
 }
-&#10;#wakatcwsug .gt_indent_3 {
+&#10;#pgsjxxsjbs .gt_indent_3 {
   text-indent: 15px;
 }
-&#10;#wakatcwsug .gt_indent_4 {
+&#10;#pgsjxxsjbs .gt_indent_4 {
   text-indent: 20px;
 }
-&#10;#wakatcwsug .gt_indent_5 {
+&#10;#pgsjxxsjbs .gt_indent_5 {
   text-indent: 25px;
 }
-&#10;#wakatcwsug .katex-display {
+&#10;#pgsjxxsjbs .katex-display {
   display: inline-flex !important;
   margin-bottom: 0.75em !important;
 }
-&#10;#wakatcwsug div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
+&#10;#pgsjxxsjbs div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
   height: 0px !important;
 }
 </style>
@@ -1750,13 +2357,13 @@ cumplot <- Cum_Comp %>%
 cumplot
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-36-1.png)<!-- -->
 
 ``` r
 stock_plot <- BPWeight %>% tbl_xts() %>% .[endpoints(.,'months')] %>% chart.StackedBar()
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-28-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-37-1.png)<!-- -->
 
 ``` r
 ## Specify the file name and dimensions for the PNG
@@ -1979,7 +2586,7 @@ VaR_plot <- chart.VaRSensitivity(R = df_Portf%>% tbl_xts(),
                      colorset=bluefocus, lwd=2)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-38-1.png)<!-- -->
 
 ``` r
 ## Specify the file name and dimensions for the PNG
@@ -2017,7 +2624,7 @@ rol_var <- chart.BarVaR(df_Portf %>% tbl_xts(),
 rol_var
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-30-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-39-1.png)<!-- -->
 
 ``` r
 sector_weights <- df %>%
@@ -2049,7 +2656,7 @@ sector_plot <- fmxdat::finplot(h, x.date.dist = "1 year", x.date.type = "%Y", x.
 sector_plot
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-31-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-40-1.png)<!-- -->
 
 ``` r
 combo_df <- Port_Rets %>% 
@@ -2075,7 +2682,7 @@ roll_sd <- finplot(i, x.date.dist = "1 year", x.date.type = "%Y", x.vert = T,
 roll_sd
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-32-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-41-1.png)<!-- -->
 
 ``` r
 # ggsave(here("Question 4/plots/rollsd.png"), plot = roll_sd, width = 8, height = 5, dpi = 300)
@@ -2138,20 +2745,20 @@ toprisk_gt <- toprisk_tab %>%
 toprisk_gt
 ```
 
-<div id="fewxnlvbks" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
-<style>#fewxnlvbks table {
+<div id="nhzpqgyxjk" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>#nhzpqgyxjk table {
   font-family: system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-&#10;#fewxnlvbks thead, #fewxnlvbks tbody, #fewxnlvbks tfoot, #fewxnlvbks tr, #fewxnlvbks td, #fewxnlvbks th {
+&#10;#nhzpqgyxjk thead, #nhzpqgyxjk tbody, #nhzpqgyxjk tfoot, #nhzpqgyxjk tr, #nhzpqgyxjk td, #nhzpqgyxjk th {
   border-style: none;
 }
-&#10;#fewxnlvbks p {
+&#10;#nhzpqgyxjk p {
   margin: 0;
   padding: 0;
 }
-&#10;#fewxnlvbks .gt_table {
+&#10;#nhzpqgyxjk .gt_table {
   display: table;
   border-collapse: collapse;
   line-height: normal;
@@ -2176,11 +2783,11 @@ toprisk_gt
   border-left-width: 2px;
   border-left-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_caption {
+&#10;#nhzpqgyxjk .gt_caption {
   padding-top: 4px;
   padding-bottom: 4px;
 }
-&#10;#fewxnlvbks .gt_title {
+&#10;#nhzpqgyxjk .gt_title {
   color: #333333;
   font-size: 125%;
   font-weight: initial;
@@ -2191,7 +2798,7 @@ toprisk_gt
   border-bottom-color: #FFFFFF;
   border-bottom-width: 0;
 }
-&#10;#fewxnlvbks .gt_subtitle {
+&#10;#nhzpqgyxjk .gt_subtitle {
   color: #333333;
   font-size: 85%;
   font-weight: initial;
@@ -2202,7 +2809,7 @@ toprisk_gt
   border-top-color: #FFFFFF;
   border-top-width: 0;
 }
-&#10;#fewxnlvbks .gt_heading {
+&#10;#nhzpqgyxjk .gt_heading {
   background-color: #FFFFFF;
   text-align: center;
   border-bottom-color: #FFFFFF;
@@ -2213,12 +2820,12 @@ toprisk_gt
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_bottom_border {
+&#10;#nhzpqgyxjk .gt_bottom_border {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_col_headings {
+&#10;#nhzpqgyxjk .gt_col_headings {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -2232,7 +2839,7 @@ toprisk_gt
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_col_heading {
+&#10;#nhzpqgyxjk .gt_col_heading {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -2251,7 +2858,7 @@ toprisk_gt
   padding-right: 5px;
   overflow-x: hidden;
 }
-&#10;#fewxnlvbks .gt_column_spanner_outer {
+&#10;#nhzpqgyxjk .gt_column_spanner_outer {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -2262,13 +2869,13 @@ toprisk_gt
   padding-left: 4px;
   padding-right: 4px;
 }
-&#10;#fewxnlvbks .gt_column_spanner_outer:first-child {
+&#10;#nhzpqgyxjk .gt_column_spanner_outer:first-child {
   padding-left: 0;
 }
-&#10;#fewxnlvbks .gt_column_spanner_outer:last-child {
+&#10;#nhzpqgyxjk .gt_column_spanner_outer:last-child {
   padding-right: 0;
 }
-&#10;#fewxnlvbks .gt_column_spanner {
+&#10;#nhzpqgyxjk .gt_column_spanner {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
@@ -2279,10 +2886,10 @@ toprisk_gt
   display: inline-block;
   width: 100%;
 }
-&#10;#fewxnlvbks .gt_spanner_row {
+&#10;#nhzpqgyxjk .gt_spanner_row {
   border-bottom-style: hidden;
 }
-&#10;#fewxnlvbks .gt_group_heading {
+&#10;#nhzpqgyxjk .gt_group_heading {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2307,7 +2914,7 @@ toprisk_gt
   vertical-align: middle;
   text-align: left;
 }
-&#10;#fewxnlvbks .gt_empty_group_heading {
+&#10;#nhzpqgyxjk .gt_empty_group_heading {
   padding: 0.5px;
   color: #333333;
   background-color: #FFFFFF;
@@ -2321,13 +2928,13 @@ toprisk_gt
   border-bottom-color: #D3D3D3;
   vertical-align: middle;
 }
-&#10;#fewxnlvbks .gt_from_md > :first-child {
+&#10;#nhzpqgyxjk .gt_from_md > :first-child {
   margin-top: 0;
 }
-&#10;#fewxnlvbks .gt_from_md > :last-child {
+&#10;#nhzpqgyxjk .gt_from_md > :last-child {
   margin-bottom: 0;
 }
-&#10;#fewxnlvbks .gt_row {
+&#10;#nhzpqgyxjk .gt_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2345,7 +2952,7 @@ toprisk_gt
   vertical-align: middle;
   overflow-x: hidden;
 }
-&#10;#fewxnlvbks .gt_stub {
+&#10;#nhzpqgyxjk .gt_stub {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -2357,7 +2964,7 @@ toprisk_gt
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#fewxnlvbks .gt_stub_row_group {
+&#10;#nhzpqgyxjk .gt_stub_row_group {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -2370,13 +2977,13 @@ toprisk_gt
   padding-right: 5px;
   vertical-align: top;
 }
-&#10;#fewxnlvbks .gt_row_group_first td {
+&#10;#nhzpqgyxjk .gt_row_group_first td {
   border-top-width: 2px;
 }
-&#10;#fewxnlvbks .gt_row_group_first th {
+&#10;#nhzpqgyxjk .gt_row_group_first th {
   border-top-width: 2px;
 }
-&#10;#fewxnlvbks .gt_summary_row {
+&#10;#nhzpqgyxjk .gt_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -2385,14 +2992,14 @@ toprisk_gt
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#fewxnlvbks .gt_first_summary_row {
+&#10;#nhzpqgyxjk .gt_first_summary_row {
   border-top-style: solid;
   border-top-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_first_summary_row.thick {
+&#10;#nhzpqgyxjk .gt_first_summary_row.thick {
   border-top-width: 2px;
 }
-&#10;#fewxnlvbks .gt_last_summary_row {
+&#10;#nhzpqgyxjk .gt_last_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2401,7 +3008,7 @@ toprisk_gt
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_grand_summary_row {
+&#10;#nhzpqgyxjk .gt_grand_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -2410,7 +3017,7 @@ toprisk_gt
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#fewxnlvbks .gt_first_grand_summary_row {
+&#10;#nhzpqgyxjk .gt_first_grand_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2419,7 +3026,7 @@ toprisk_gt
   border-top-width: 6px;
   border-top-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_last_grand_summary_row_top {
+&#10;#nhzpqgyxjk .gt_last_grand_summary_row_top {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2428,10 +3035,10 @@ toprisk_gt
   border-bottom-width: 6px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_striped {
+&#10;#nhzpqgyxjk .gt_striped {
   background-color: rgba(128, 128, 128, 0.05);
 }
-&#10;#fewxnlvbks .gt_table_body {
+&#10;#nhzpqgyxjk .gt_table_body {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -2439,7 +3046,7 @@ toprisk_gt
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_footnotes {
+&#10;#nhzpqgyxjk .gt_footnotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -2452,7 +3059,7 @@ toprisk_gt
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_footnote {
+&#10;#nhzpqgyxjk .gt_footnote {
   margin: 0px;
   font-size: 90%;
   padding-top: 4px;
@@ -2460,7 +3067,7 @@ toprisk_gt
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#fewxnlvbks .gt_sourcenotes {
+&#10;#nhzpqgyxjk .gt_sourcenotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -2473,64 +3080,64 @@ toprisk_gt
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#fewxnlvbks .gt_sourcenote {
+&#10;#nhzpqgyxjk .gt_sourcenote {
   font-size: 90%;
   padding-top: 4px;
   padding-bottom: 4px;
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#fewxnlvbks .gt_left {
+&#10;#nhzpqgyxjk .gt_left {
   text-align: left;
 }
-&#10;#fewxnlvbks .gt_center {
+&#10;#nhzpqgyxjk .gt_center {
   text-align: center;
 }
-&#10;#fewxnlvbks .gt_right {
+&#10;#nhzpqgyxjk .gt_right {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-&#10;#fewxnlvbks .gt_font_normal {
+&#10;#nhzpqgyxjk .gt_font_normal {
   font-weight: normal;
 }
-&#10;#fewxnlvbks .gt_font_bold {
+&#10;#nhzpqgyxjk .gt_font_bold {
   font-weight: bold;
 }
-&#10;#fewxnlvbks .gt_font_italic {
+&#10;#nhzpqgyxjk .gt_font_italic {
   font-style: italic;
 }
-&#10;#fewxnlvbks .gt_super {
+&#10;#nhzpqgyxjk .gt_super {
   font-size: 65%;
 }
-&#10;#fewxnlvbks .gt_footnote_marks {
+&#10;#nhzpqgyxjk .gt_footnote_marks {
   font-size: 75%;
   vertical-align: 0.4em;
   position: initial;
 }
-&#10;#fewxnlvbks .gt_asterisk {
+&#10;#nhzpqgyxjk .gt_asterisk {
   font-size: 100%;
   vertical-align: 0;
 }
-&#10;#fewxnlvbks .gt_indent_1 {
+&#10;#nhzpqgyxjk .gt_indent_1 {
   text-indent: 5px;
 }
-&#10;#fewxnlvbks .gt_indent_2 {
+&#10;#nhzpqgyxjk .gt_indent_2 {
   text-indent: 10px;
 }
-&#10;#fewxnlvbks .gt_indent_3 {
+&#10;#nhzpqgyxjk .gt_indent_3 {
   text-indent: 15px;
 }
-&#10;#fewxnlvbks .gt_indent_4 {
+&#10;#nhzpqgyxjk .gt_indent_4 {
   text-indent: 20px;
 }
-&#10;#fewxnlvbks .gt_indent_5 {
+&#10;#nhzpqgyxjk .gt_indent_5 {
   text-indent: 25px;
 }
-&#10;#fewxnlvbks .katex-display {
+&#10;#nhzpqgyxjk .katex-display {
   display: inline-flex !important;
   margin-bottom: 0.75em !important;
 }
-&#10;#fewxnlvbks div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
+&#10;#nhzpqgyxjk div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
   height: 0px !important;
 }
 </style>
@@ -2595,20 +3202,20 @@ gt() %>%
 DownsideRiskEst
 ```
 
-<div id="nxdxrgqquj" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
-<style>#nxdxrgqquj table {
+<div id="omhicdfnkx" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>#omhicdfnkx table {
   font-family: system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-&#10;#nxdxrgqquj thead, #nxdxrgqquj tbody, #nxdxrgqquj tfoot, #nxdxrgqquj tr, #nxdxrgqquj td, #nxdxrgqquj th {
+&#10;#omhicdfnkx thead, #omhicdfnkx tbody, #omhicdfnkx tfoot, #omhicdfnkx tr, #omhicdfnkx td, #omhicdfnkx th {
   border-style: none;
 }
-&#10;#nxdxrgqquj p {
+&#10;#omhicdfnkx p {
   margin: 0;
   padding: 0;
 }
-&#10;#nxdxrgqquj .gt_table {
+&#10;#omhicdfnkx .gt_table {
   display: table;
   border-collapse: collapse;
   line-height: normal;
@@ -2633,11 +3240,11 @@ DownsideRiskEst
   border-left-width: 2px;
   border-left-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_caption {
+&#10;#omhicdfnkx .gt_caption {
   padding-top: 4px;
   padding-bottom: 4px;
 }
-&#10;#nxdxrgqquj .gt_title {
+&#10;#omhicdfnkx .gt_title {
   color: #333333;
   font-size: 125%;
   font-weight: initial;
@@ -2648,7 +3255,7 @@ DownsideRiskEst
   border-bottom-color: #FFFFFF;
   border-bottom-width: 0;
 }
-&#10;#nxdxrgqquj .gt_subtitle {
+&#10;#omhicdfnkx .gt_subtitle {
   color: #333333;
   font-size: 85%;
   font-weight: initial;
@@ -2659,7 +3266,7 @@ DownsideRiskEst
   border-top-color: #FFFFFF;
   border-top-width: 0;
 }
-&#10;#nxdxrgqquj .gt_heading {
+&#10;#omhicdfnkx .gt_heading {
   background-color: #FFFFFF;
   text-align: center;
   border-bottom-color: #FFFFFF;
@@ -2670,12 +3277,12 @@ DownsideRiskEst
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_bottom_border {
+&#10;#omhicdfnkx .gt_bottom_border {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_col_headings {
+&#10;#omhicdfnkx .gt_col_headings {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -2689,7 +3296,7 @@ DownsideRiskEst
   border-right-width: 1px;
   border-right-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_col_heading {
+&#10;#omhicdfnkx .gt_col_heading {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -2708,7 +3315,7 @@ DownsideRiskEst
   padding-right: 5px;
   overflow-x: hidden;
 }
-&#10;#nxdxrgqquj .gt_column_spanner_outer {
+&#10;#omhicdfnkx .gt_column_spanner_outer {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -2719,13 +3326,13 @@ DownsideRiskEst
   padding-left: 4px;
   padding-right: 4px;
 }
-&#10;#nxdxrgqquj .gt_column_spanner_outer:first-child {
+&#10;#omhicdfnkx .gt_column_spanner_outer:first-child {
   padding-left: 0;
 }
-&#10;#nxdxrgqquj .gt_column_spanner_outer:last-child {
+&#10;#omhicdfnkx .gt_column_spanner_outer:last-child {
   padding-right: 0;
 }
-&#10;#nxdxrgqquj .gt_column_spanner {
+&#10;#omhicdfnkx .gt_column_spanner {
   border-bottom-style: solid;
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
@@ -2736,10 +3343,10 @@ DownsideRiskEst
   display: inline-block;
   width: 100%;
 }
-&#10;#nxdxrgqquj .gt_spanner_row {
+&#10;#omhicdfnkx .gt_spanner_row {
   border-bottom-style: hidden;
 }
-&#10;#nxdxrgqquj .gt_group_heading {
+&#10;#omhicdfnkx .gt_group_heading {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2764,7 +3371,7 @@ DownsideRiskEst
   vertical-align: middle;
   text-align: left;
 }
-&#10;#nxdxrgqquj .gt_empty_group_heading {
+&#10;#omhicdfnkx .gt_empty_group_heading {
   padding: 0.5px;
   color: #333333;
   background-color: #FFFFFF;
@@ -2778,13 +3385,13 @@ DownsideRiskEst
   border-bottom-color: #D3D3D3;
   vertical-align: middle;
 }
-&#10;#nxdxrgqquj .gt_from_md > :first-child {
+&#10;#omhicdfnkx .gt_from_md > :first-child {
   margin-top: 0;
 }
-&#10;#nxdxrgqquj .gt_from_md > :last-child {
+&#10;#omhicdfnkx .gt_from_md > :last-child {
   margin-bottom: 0;
 }
-&#10;#nxdxrgqquj .gt_row {
+&#10;#omhicdfnkx .gt_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2802,7 +3409,7 @@ DownsideRiskEst
   vertical-align: middle;
   overflow-x: hidden;
 }
-&#10;#nxdxrgqquj .gt_stub {
+&#10;#omhicdfnkx .gt_stub {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -2814,7 +3421,7 @@ DownsideRiskEst
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#nxdxrgqquj .gt_stub_row_group {
+&#10;#omhicdfnkx .gt_stub_row_group {
   color: #333333;
   background-color: #FFFFFF;
   font-size: 100%;
@@ -2827,13 +3434,13 @@ DownsideRiskEst
   padding-right: 5px;
   vertical-align: top;
 }
-&#10;#nxdxrgqquj .gt_row_group_first td {
+&#10;#omhicdfnkx .gt_row_group_first td {
   border-top-width: 2px;
 }
-&#10;#nxdxrgqquj .gt_row_group_first th {
+&#10;#omhicdfnkx .gt_row_group_first th {
   border-top-width: 2px;
 }
-&#10;#nxdxrgqquj .gt_summary_row {
+&#10;#omhicdfnkx .gt_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -2842,14 +3449,14 @@ DownsideRiskEst
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#nxdxrgqquj .gt_first_summary_row {
+&#10;#omhicdfnkx .gt_first_summary_row {
   border-top-style: solid;
   border-top-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_first_summary_row.thick {
+&#10;#omhicdfnkx .gt_first_summary_row.thick {
   border-top-width: 2px;
 }
-&#10;#nxdxrgqquj .gt_last_summary_row {
+&#10;#omhicdfnkx .gt_last_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2858,7 +3465,7 @@ DownsideRiskEst
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_grand_summary_row {
+&#10;#omhicdfnkx .gt_grand_summary_row {
   color: #333333;
   background-color: #FFFFFF;
   text-transform: inherit;
@@ -2867,7 +3474,7 @@ DownsideRiskEst
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#nxdxrgqquj .gt_first_grand_summary_row {
+&#10;#omhicdfnkx .gt_first_grand_summary_row {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2876,7 +3483,7 @@ DownsideRiskEst
   border-top-width: 6px;
   border-top-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_last_grand_summary_row_top {
+&#10;#omhicdfnkx .gt_last_grand_summary_row_top {
   padding-top: 8px;
   padding-bottom: 8px;
   padding-left: 5px;
@@ -2885,10 +3492,10 @@ DownsideRiskEst
   border-bottom-width: 6px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_striped {
+&#10;#omhicdfnkx .gt_striped {
   background-color: rgba(128, 128, 128, 0.05);
 }
-&#10;#nxdxrgqquj .gt_table_body {
+&#10;#omhicdfnkx .gt_table_body {
   border-top-style: solid;
   border-top-width: 2px;
   border-top-color: #D3D3D3;
@@ -2896,7 +3503,7 @@ DownsideRiskEst
   border-bottom-width: 2px;
   border-bottom-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_footnotes {
+&#10;#omhicdfnkx .gt_footnotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -2909,7 +3516,7 @@ DownsideRiskEst
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_footnote {
+&#10;#omhicdfnkx .gt_footnote {
   margin: 0px;
   font-size: 90%;
   padding-top: 4px;
@@ -2917,7 +3524,7 @@ DownsideRiskEst
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#nxdxrgqquj .gt_sourcenotes {
+&#10;#omhicdfnkx .gt_sourcenotes {
   color: #333333;
   background-color: #FFFFFF;
   border-bottom-style: none;
@@ -2930,64 +3537,64 @@ DownsideRiskEst
   border-right-width: 2px;
   border-right-color: #D3D3D3;
 }
-&#10;#nxdxrgqquj .gt_sourcenote {
+&#10;#omhicdfnkx .gt_sourcenote {
   font-size: 90%;
   padding-top: 4px;
   padding-bottom: 4px;
   padding-left: 5px;
   padding-right: 5px;
 }
-&#10;#nxdxrgqquj .gt_left {
+&#10;#omhicdfnkx .gt_left {
   text-align: left;
 }
-&#10;#nxdxrgqquj .gt_center {
+&#10;#omhicdfnkx .gt_center {
   text-align: center;
 }
-&#10;#nxdxrgqquj .gt_right {
+&#10;#omhicdfnkx .gt_right {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-&#10;#nxdxrgqquj .gt_font_normal {
+&#10;#omhicdfnkx .gt_font_normal {
   font-weight: normal;
 }
-&#10;#nxdxrgqquj .gt_font_bold {
+&#10;#omhicdfnkx .gt_font_bold {
   font-weight: bold;
 }
-&#10;#nxdxrgqquj .gt_font_italic {
+&#10;#omhicdfnkx .gt_font_italic {
   font-style: italic;
 }
-&#10;#nxdxrgqquj .gt_super {
+&#10;#omhicdfnkx .gt_super {
   font-size: 65%;
 }
-&#10;#nxdxrgqquj .gt_footnote_marks {
+&#10;#omhicdfnkx .gt_footnote_marks {
   font-size: 75%;
   vertical-align: 0.4em;
   position: initial;
 }
-&#10;#nxdxrgqquj .gt_asterisk {
+&#10;#omhicdfnkx .gt_asterisk {
   font-size: 100%;
   vertical-align: 0;
 }
-&#10;#nxdxrgqquj .gt_indent_1 {
+&#10;#omhicdfnkx .gt_indent_1 {
   text-indent: 5px;
 }
-&#10;#nxdxrgqquj .gt_indent_2 {
+&#10;#omhicdfnkx .gt_indent_2 {
   text-indent: 10px;
 }
-&#10;#nxdxrgqquj .gt_indent_3 {
+&#10;#omhicdfnkx .gt_indent_3 {
   text-indent: 15px;
 }
-&#10;#nxdxrgqquj .gt_indent_4 {
+&#10;#omhicdfnkx .gt_indent_4 {
   text-indent: 20px;
 }
-&#10;#nxdxrgqquj .gt_indent_5 {
+&#10;#omhicdfnkx .gt_indent_5 {
   text-indent: 25px;
 }
-&#10;#nxdxrgqquj .katex-display {
+&#10;#omhicdfnkx .katex-display {
   display: inline-flex !important;
   margin-bottom: 0.75em !important;
 }
-&#10;#nxdxrgqquj div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
+&#10;#omhicdfnkx div.Reactable > div.rt-table > div.rt-thead > div.rt-tr.rt-tr-group-header > div.rt-th-group:after {
   height: 0px !important;
 }
 </style>

@@ -164,6 +164,13 @@
 \IfFileExists{upquote.sty}{\usepackage{upquote}}{}
 
 %%% Include extra packages specified by user
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{longtable}
+\usepackage{colortbl}
+\usepackage{array}
+\usepackage{anyfontsize}
+\usepackage{multirow}
 
 %%% Hard setting column skips for reports - this ensures greater consistency and control over the length settings in the document.
 %% page layout
@@ -198,7 +205,7 @@
 
 \begin{frontmatter}  %
 
-\title{Question 3:}
+\title{Question 3: Portfolio Construction}
 
 % Set to FALSE if wanting to remove title (for submission)
 
@@ -217,7 +224,7 @@
 
 \begin{abstract}
 \small{
-Here is a little something for the abstract
+Comparison of the SWIX(J403) and ALSI(J203) Indexes
 }
 \end{abstract}
 
@@ -258,6 +265,63 @@ Here is a little something for the abstract
 
 \section*{Introduction}\label{introduction}
 \addcontentsline{toc}{section}{Introduction}
+
+We begin our research into these indexes by first comparing their
+weighting of constituent stocks. First we will look at sector allocation
+and then market cap size allocations.
+
+\includegraphics{Question-3_files/figure-latex/unnamed-chunk-2-1.pdf}
+
+The sector weight allocations are clearly not exactly the same but they
+are certainly very close and their reweighting over time seems to rhyme.
+
+\includegraphics{Question-3_files/figure-latex/unnamed-chunk-3-1.pdf}
+
+Index allocations are also very similar. A surprising amount of NAs.
+Both greatly favour large caps while mid caps make up about a quarter of
+the allocation and small caps are a trivial component. J403 appears to
+have a slightly higher allocation in mid caps while J203 appear to have
+a relatively higher allocation in large caps, this is especially in the
+most recent months.
+
+\section{Performance}\label{performance}
+
+\includegraphics{Question-3_files/figure-latex/unnamed-chunk-4-1.pdf}
+
+Cumulative returns for the indexes closely tracked each other up until
+2020 after which they diverged and with J203 pulling ahead. This might
+be related to J203's heavier allocation in large caps relative to J403.
+
+Below we compare rolling standard deviation as a proxy for volatility
+and risk.
+
+\includegraphics{Question-3_files/figure-latex/unnamed-chunk-5-1.pdf}
+
+The risk profile according to the standard deviation measure is
+remarkably similar especially given the divergence in cumulative returns
+in the last two years.
+
+The results of the expected shortfall comparison between the indexes
+support this finding.
+
+\begin{table}[!t]
+\caption*{
+{\large Expected Shortfall Results}
+} 
+\fontsize{12.0pt}{14.4pt}\selectfont
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lr}
+\toprule
+Index & Expected\_Shortfall \\ 
+\midrule\addlinespace[2.5pt]
+J203 & -0.0246 \\ 
+J403 & -0.0239 \\ 
+\bottomrule
+\end{tabular*}
+\end{table}
+
+J203 only displays a marginally more negative expected shortfall than
+does J403 which indicates that both have similar levels of tail risk in
+extreme conditions.
 
 \bibliography{Tex/ref}
 

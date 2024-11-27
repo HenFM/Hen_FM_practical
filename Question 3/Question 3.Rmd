@@ -91,15 +91,312 @@ output:
     template: Tex/TexDefault.txt
     fig_width: 3.5 # Adjust default figure sizes. This can also be done in the chunks of the text.
     fig_height: 3.5
-abstract: Here is a little something for the abstract
+abstract: Comparison of the SWIX(J403) and ALSI(J203) Indexes
   
 ---
 
 
-```{r}
-ALSI <- read_rds(here("data", "ALSI.rds"))
-RebDays <- read_rds(here("data", "Rebalance_days.rds"))
+```{r message=FALSE, warning=FALSE, include=FALSE}
+pacman::p_load(tidyverse)
+ALSI <- read_rds("/Users/R/Hen_FM_practical/data/ALSI.rds")
+RebDays <- read_rds("/Users/R/Hen_FM_practical/data/Rebalance_days.rds")
 ```
 
 
 # Introduction {-}
+
+We begin our research into these indexes by first comparing their weighting of constituent stocks. First we will look at sector allocation and then market cap size allocations. 
+
+```{r echo=FALSE, fig.height=6, fig.width=6, message=FALSE, warning=FALSE}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(patchwork) # For combining plots
+
+# Step 1: Aggregate Data by Sector and Date
+sector_allocation <- ALSI %>%
+  group_by(date, Sector) %>%
+  summarise(
+    J203_sum = sum(J203, na.rm = TRUE),
+    J403_sum = sum(J403, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(date) %>%
+  mutate(
+    J203_share = J203_sum / sum(J203_sum, na.rm = TRUE),
+    J403_share = J403_sum / sum(J403_sum, na.rm = TRUE)
+  )
+
+# Step 2: Plot Sector Allocation for J203
+plot_j203 <- ggplot(sector_allocation, aes(x = date, y = J203_share, fill = Sector)) +
+  geom_area(position = "stack") +
+  labs(
+    title = "J203",
+    y = "Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none", # legend is shared by both figs
+    axis.title.x = element_blank() # Remove x-axis label
+  )
+
+# Step 3: Plot Sector Allocation for J403
+plot_j403 <- ggplot(sector_allocation, aes(x = date, y = J403_share, fill = Sector)) +
+  geom_area(position = "stack") +
+  labs(
+    title = "J403",
+    y = "Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none", # Legend will be shared
+    axis.title.x = element_blank() # Remove x-axis label
+  )
+
+# Step 4: Combine the Two Plots with Shared Legend and Main Title
+combined_plot <- (plot_j203 / plot_j403) +
+  plot_layout(guides = "collect") & 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# Add a main title
+combined_plot <- combined_plot + plot_annotation(
+  title = "Sector Allocation Over Time"
+)
+
+combined_plot
+#ggsave(here("Question 3/plots/sectweights.png"), plot = combined_plot, width = 8, height = 5, dpi = 300)
+```
+
+The sector weight allocations are clearly not exactly the same but they are certainly very close and their reweighting over time seems to rhyme.
+
+```{r echo=FALSE, fig.height=6, fig.width=6, message=FALSE, warning=FALSE}
+
+
+# Step 1: Update Index_Name for Ticker == "RBW"
+ALSI <- ALSI %>%
+  mutate(Index_Name = ifelse(Tickers == "RBW", "Mid_Caps", Index_Name))
+
+# Step 2: Aggregate Data by Index_Name and Date
+index_allocation <- ALSI %>%
+  group_by(date, Index_Name) %>%
+  summarise(
+    J203_sum = sum(J203, na.rm = TRUE),
+    J403_sum = sum(J403, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(date) %>%
+  mutate(
+    J203_share = J203_sum / sum(J203_sum, na.rm = TRUE),
+    J403_share = J403_sum / sum(J403_sum, na.rm = TRUE)
+  )
+
+# Step 3: Plot Allocation for J203
+plot_j203 <- ggplot(index_allocation, aes(x = date, y = J203_share, fill = Index_Name)) +
+  geom_area(position = "stack") +
+  labs(
+    title = "J203",
+    y = "Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none", # Legend will be shared
+    axis.title.x = element_blank() # Remove x-axis label
+  )
+
+# Step 4: Plot Allocation for J403
+plot_j403 <- ggplot(index_allocation, aes(x = date, y = J403_share, fill = Index_Name)) +
+  geom_area(position = "stack") +
+  labs(
+    title = "J403",
+    y = "Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none", # Legend will be shared
+    axis.title.x = element_blank() # Remove x-axis label
+  )
+
+# Step 5: Combine the Two Plots with Shared Legend and Main Title
+combined_plot <- (plot_j203 / plot_j403) +
+  plot_layout(guides = "collect") & 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# Add a main title
+index_plot <- combined_plot + plot_annotation(
+  title = "Index Allocation Over Time"
+)
+
+# Display the Combined Plot
+index_plot
+
+# ggsave(here("Question 3/plots/index_plot.png"), plot = index_plot, width = 8, height = 5, dpi = 300)
+```
+
+Index allocations are also very similar. A surprising amount of NAs. Both greatly favour large caps while mid caps make up about a quarter of the allocation and small caps are a trivial component. J403 appears to have a slightly higher allocation in mid caps while J203 appear to have a relatively higher allocation in large caps, this is especially in the most recent months. 
+
+# Performance
+
+```{r echo=FALSE, fig.height=6, fig.width=6, message=FALSE, warning=FALSE}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+# Step 1: Calculate Weighted Returns for Each Index
+cumulative_returns <- ALSI %>%
+  group_by(date) %>%
+  summarise(
+    J203_weighted_return = sum(Return * J203, na.rm = TRUE), # Weighted return for J203
+    J403_weighted_return = sum(Return * J403, na.rm = TRUE), # Weighted return for J403
+    .groups = "drop"
+  ) %>%
+  mutate(
+    J203_cum_return = cumprod(1 + J203_weighted_return), # Cumulative return for J203
+    J403_cum_return = cumprod(1 + J403_weighted_return)  # Cumulative return for J403
+  )
+
+# Step 2: Reshape Data for Plotting
+cumulative_returns_long <- cumulative_returns %>%
+  select(date, J203_cum_return, J403_cum_return) %>%
+  pivot_longer(
+    cols = starts_with("J"),
+    names_to = "Index",
+    values_to = "Cumulative_Return"
+  )
+
+# Step 3: Plot Cumulative Returns
+cumulative_plot <- ggplot(cumulative_returns_long, aes(x = date, y = Cumulative_Return, color = Index)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Cumulative Returns for J203 and J403",
+    x = "",
+    y = "Cumulative Return",
+    color = "Index"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+cumret <- fmxdat::finplot(cumulative_plot, x.date.dist = "1 year", x.date.type = "%Y", x.vert = T,
+    y.pct = T, y.pct_acc = 1)
+
+# Display the Plot
+print(cumret)
+#ggsave(here("Question 3/plots/cumret.png"), plot = cumret, width = 8, height = 5, dpi = 300)
+
+```
+
+Cumulative returns for the indexes closely tracked each other up until 2020 after which they diverged and with J203 pulling ahead. This might be related to J203's heavier allocation in large caps relative to J403. 
+
+
+Below we compare rolling standard deviation as a proxy for volatility and risk. 
+
+```{r echo=FALSE, fig.height=4, fig.width=6, message=FALSE, warning=FALSE}
+library(RcppRoll)
+
+# Step 1: Calculate weighted returns for each index
+rolling_sd_df <- ALSI %>%
+  group_by(date) %>%
+  summarise(
+    J203_weighted_return = sum(Return * J203, na.rm = TRUE), # Weighted return for J203
+    J403_weighted_return = sum(Return * J403, na.rm = TRUE), # Weighted return for J403
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = starts_with("J"),
+    names_to = "Index",
+    values_to = "Returns"
+  ) %>%
+  group_by(Index) %>%
+  mutate(
+    RollSD = RcppRoll::roll_sd(1 + Returns, 24, fill = NA, align = "right") * sqrt(12) # Annualized rolling SD
+  ) %>%
+  filter(!is.na(RollSD))
+
+# Step 2: Plot the rolling 2-year standard deviation
+i <- rolling_sd_df %>%
+  ggplot() +
+  geom_line(aes(date, RollSD, color = Index), alpha = 0.7, size = 1.25) +
+  labs(
+    title = "Rolling 2-Year Annualized Standard Deviation Comparison",
+    x = "",
+    y = "Rolling 2-Year Returns (Ann.)",
+    caption = "Note: Monthly data, annualized SD calculated over a 24-month rolling window"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "bottom"
+  )
+
+# Display the plot
+print(i)
+```
+
+The risk profile according to the standard deviation measure is remarkably similar especially given the divergence in cumulative returns in the last two years. 
+
+
+The results of the expected shortfall comparison between the indexes support this finding. 
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Load required libraries
+library(dplyr)
+library(PerformanceAnalytics)
+
+# Step 1: Filter data for the last 2 years
+last_two_years <- ALSI %>%
+  filter(date >= max(date) - lubridate::years(2)) %>%
+  group_by(date) %>%
+  summarise(
+    J203_weighted_return = sum(Return * J203, na.rm = TRUE),
+    J403_weighted_return = sum(Return * J403, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Step 2: Compute Expected Shortfall
+# Convert data to xts for PerformanceAnalytics compatibility
+returns_xts <- xts::xts(
+  last_two_years %>% select(J203_weighted_return, J403_weighted_return),
+  order.by = last_two_years$date
+)
+
+# Calculate Expected Shortfall (at 95% confidence level)
+es_values <- PerformanceAnalytics::ES(
+  R = returns_xts,
+  p = 0.05,
+  method = "historical"
+)
+
+# Step 3: Print the Expected Shortfall results
+es_results <- tibble::tibble(
+  Index = c("J203", "J403"),
+  Expected_Shortfall = as.numeric(es_values)
+)
+
+# Display the results
+print(es_results)
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Create gt Table
+library(gt)
+es_results %>%
+  gt() %>%
+  tab_header(
+    title = "Expected Shortfall Results"
+  ) %>%
+  fmt_number(
+    columns = vars(Expected_Shortfall),
+    decimals = 4
+  )
+```
+
+
+J203 only displays a marginally more negative expected shortfall than does J403 which indicates that both have similar levels of tail risk in extreme conditions. 
+
+
+
