@@ -49,7 +49,9 @@ comp_plot <- Cum_Fee_Comparison(Active_Median %>% rename(Returns = Median_Return
                                Gap = 3, Lvlset = 3,
                                mnthfwd = 18)
 
-ggsave(paste0(wd, "/Question 1/plots/comp_plot.png"), plot = comp_plot, width = 10, height = 10, dpi = 300)
+#ggsave(paste0(wd, "/Question 1/plots/comp_plot.png"), plot = comp_plot, width = 10, height = 10, dpi = 300)
+
+comp_plot
 ```
 
 ![](/Users/R/Hen_FM_practical/Question 1/plots/comp_plot.png)
@@ -104,7 +106,7 @@ gg <- fmxdat::finplot(g, x.date.dist = "1 year", x.date.type = "%Y", x.vert = T,
     y.pct = T, y.pct_acc = 1)
 
 
-ggsave(paste0(wd, "/Question 1/plots/rolling.png"), plot = gg, width = 8, height = 6, dpi = 300)
+#ggsave(paste0(wd, "/Question 1/plots/rolling.png"), plot = gg, width = 8, height = 6, dpi = 300)
 ```
 
 ![](/Users/R/Hen_FM_practical/Question 1/plots/rolling.png)
@@ -141,7 +143,7 @@ plotdens <- plotdf %>%
 
 plotdens
 
-ggsave(paste0(wd, "/Question 1/plots/dens.png"), plot = plotdens, width = 8, height = 6, dpi = 300)
+#ggsave(paste0(wd, "/Question 1/plots/dens.png"), plot = plotdens, width = 8, height = 6, dpi = 300)
 ```
 
 ![](/Users/R/Hen_FM_practical/Question 1/plots/dens.png)
@@ -239,7 +241,9 @@ Rel_perf <- g2 +
 
 
 
-ggsave(paste0(wd, "/Question 1/plots/rel_perf.png"), plot = Rel_perf, width = 8, height = 6, dpi = 300)
+#ggsave(paste0(wd, "/Question 1/plots/rel_perf.png"), plot = Rel_perf, width = 8, height = 6, dpi = 300)
+
+Rel_perf
 
 ```
 
